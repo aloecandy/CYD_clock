@@ -403,32 +403,71 @@ static void air_quality_icon_draw_event_cb(lv_event_t *e)
     draw_air_quality_face(draw_ctx, coords.x1, coords.y1, s_air_quality_visual_value);
 }
 
+static void draw_clock_ticks(lv_draw_ctx_t *draw_ctx, const lv_area_t *coords)
+{
+    lv_coord_t radius = LV_MIN(lv_area_get_width(coords), lv_area_get_height(coords)) / 2 - 4;
+    lv_point_t center = {
+        .x = coords->x1 + lv_area_get_width(coords) / 2,
+        .y = coords->y1 + lv_area_get_height(coords) / 2,
+    };
+    lv_draw_line_dsc_t line_dsc;
+
+    lv_draw_line_dsc_init(&line_dsc);
+    line_dsc.color = lv_color_black();
+    line_dsc.round_end = 1;
+    line_dsc.round_start = 1;
+
+    for(int i = 0; i < 60; ++i) {
+        int32_t angle = 270 + (i * 6);
+        lv_coord_t outer_radius = radius;
+        lv_coord_t inner_radius;
+
+        if((i % 15) == 0) {
+            inner_radius = radius - 22;
+            line_dsc.width = 5;
+        } else if((i % 5) == 0) {
+            inner_radius = radius - 16;
+            line_dsc.width = 3;
+        } else {
+            inner_radius = radius - 10;
+            line_dsc.width = 2;
+        }
+
+        lv_point_t p1 = {
+            .x = center.x + (lv_trigo_cos(angle) * inner_radius) / LV_TRIGO_SIN_MAX,
+            .y = center.y + (lv_trigo_sin(angle) * inner_radius) / LV_TRIGO_SIN_MAX,
+        };
+        lv_point_t p2 = {
+            .x = center.x + (lv_trigo_cos(angle) * outer_radius) / LV_TRIGO_SIN_MAX,
+            .y = center.y + (lv_trigo_sin(angle) * outer_radius) / LV_TRIGO_SIN_MAX,
+        };
+
+        lv_draw_line(draw_ctx, &line_dsc, &p1, &p2);
+    }
+}
+
 static void clock_meter_draw_event_cb(lv_event_t *e)
 {
-    if(lv_event_get_code(e) != LV_EVENT_DRAW_PART_BEGIN) {
+    if(lv_event_get_code(e) != LV_EVENT_DRAW_POST || s_clock_meter == NULL) {
         return;
     }
 
-    lv_obj_draw_part_dsc_t *dsc = lv_event_get_draw_part_dsc(e);
-    if(dsc == NULL || !lv_obj_draw_part_check_type(dsc, &lv_meter_class, LV_METER_DRAW_PART_TICK)) {
-        return;
-    }
-
-    if(dsc->text != NULL) {
-        dsc->text[0] = '\0';
-    }
+    lv_draw_ctx_t *draw_ctx = lv_event_get_draw_ctx(e);
+    lv_area_t coords;
+    lv_obj_get_content_coords(s_clock_meter, &coords);
+    draw_clock_ticks(draw_ctx, &coords);
 }
 
 static void format_update_time(char *buffer, size_t buffer_len, time_t timestamp)
 {
     if(timestamp == 0) {
-        strlcpy(buffer, "@--:--", buffer_len);
+        strlcpy(buffer, "[--:--:--]", buffer_len);
         return;
     }
 
     struct tm time_info;
     localtime_r(&timestamp, &time_info);
-    strftime(buffer, buffer_len, "@%H:%M", &time_info);
+    strftime(buffer, buffer_len, "[%H:%M:%S]", &time_info);
 }
 
 static bool refresh_due_minutes(time_t now, time_t last_update, uint16_t minutes)
@@ -571,6 +610,7 @@ static void populate_time_tab(lv_obj_t *tab)
     lv_obj_set_style_pad_all(clock_card, 8, 0);
     lv_obj_set_style_radius(clock_card, 16, 0);
     lv_obj_clear_flag(clock_card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(clock_card, clock_meter_draw_event_cb, LV_EVENT_DRAW_POST, NULL);
 
     s_clock_meter = lv_meter_create(clock_card);
     lv_obj_center(s_clock_meter);
@@ -582,15 +622,24 @@ static void populate_time_tab(lv_obj_t *tab)
     lv_obj_set_style_height(s_clock_meter, 12, LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(s_clock_meter, lv_color_black(), LV_PART_INDICATOR);
     lv_obj_set_style_border_width(s_clock_meter, 0, LV_PART_INDICATOR);
-    lv_obj_add_event_cb(s_clock_meter, clock_meter_draw_event_cb, LV_EVENT_DRAW_PART_BEGIN, NULL);
 
-    lv_meter_scale_t *scale = lv_meter_add_scale(s_clock_meter);
-    lv_meter_set_scale_ticks(s_clock_meter, scale, 60, 2, 10, lv_palette_lighten(LV_PALETTE_BLUE_GREY, 2));
-    lv_meter_set_scale_major_ticks(s_clock_meter, scale, 5, 4, 18, lv_color_black(), 12);
-    lv_meter_set_scale_range(s_clock_meter, scale, 0, 60, 360, 270);
-    s_hour_indic = lv_meter_add_needle_line(s_clock_meter, scale, 6, lv_color_black(), -56);
-    s_minute_indic = lv_meter_add_needle_line(s_clock_meter, scale, 4, lv_palette_darken(LV_PALETTE_GREY, 3), -24);
-    s_second_indic = lv_meter_add_needle_line(s_clock_meter, scale, 2, lv_palette_main(LV_PALETTE_RED), 0);
+    lv_meter_scale_t *hour_scale = lv_meter_add_scale(s_clock_meter);
+    lv_meter_set_scale_ticks(s_clock_meter, hour_scale, 2, 0, 0, lv_color_black());
+    lv_meter_set_scale_major_ticks(s_clock_meter, hour_scale, 0, 0, 0, lv_color_black(), 0);
+    lv_meter_set_scale_range(s_clock_meter, hour_scale, 0, 12 * 60 * 60, 360, 270);
+    s_hour_indic = lv_meter_add_needle_line(s_clock_meter, hour_scale, 6, lv_color_black(), -56);
+
+    lv_meter_scale_t *minute_scale = lv_meter_add_scale(s_clock_meter);
+    lv_meter_set_scale_ticks(s_clock_meter, minute_scale, 2, 0, 0, lv_color_black());
+    lv_meter_set_scale_major_ticks(s_clock_meter, minute_scale, 0, 0, 0, lv_color_black(), 0);
+    lv_meter_set_scale_range(s_clock_meter, minute_scale, 0, 60 * 60, 360, 270);
+    s_minute_indic = lv_meter_add_needle_line(s_clock_meter, minute_scale, 4, lv_palette_darken(LV_PALETTE_GREY, 3), -24);
+
+    lv_meter_scale_t *second_scale = lv_meter_add_scale(s_clock_meter);
+    lv_meter_set_scale_ticks(s_clock_meter, second_scale, 2, 0, 0, lv_color_black());
+    lv_meter_set_scale_major_ticks(s_clock_meter, second_scale, 0, 0, 0, lv_color_black(), 0);
+    lv_meter_set_scale_range(s_clock_meter, second_scale, 0, 60, 360, 270);
+    s_second_indic = lv_meter_add_needle_line(s_clock_meter, second_scale, 2, lv_palette_main(LV_PALETTE_RED), 0);
 
     lv_obj_t *digital_col = lv_obj_create(tab);
     style_plain_container(digital_col);
@@ -786,8 +835,9 @@ static void update_clock_ui(void)
     char time_text[16];
 
     localtime_r(&now, &time_info);
-    lv_meter_set_indicator_value(s_clock_meter, s_hour_indic, (time_info.tm_hour % 12) * 5 + time_info.tm_min / 12);
-    lv_meter_set_indicator_value(s_clock_meter, s_minute_indic, time_info.tm_min);
+    lv_meter_set_indicator_value(s_clock_meter, s_hour_indic,
+                                 (time_info.tm_hour % 12) * 3600 + time_info.tm_min * 60 + time_info.tm_sec);
+    lv_meter_set_indicator_value(s_clock_meter, s_minute_indic, time_info.tm_min * 60 + time_info.tm_sec);
     lv_meter_set_indicator_value(s_clock_meter, s_second_indic, time_info.tm_sec);
 
     format_digital_clock(&time_info, date_text, sizeof(date_text), time_text, sizeof(time_text));
