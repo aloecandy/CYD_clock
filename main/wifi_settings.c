@@ -10,6 +10,7 @@
 
 #define WIFI_NAMESPACE "smart_clock"
 #define WIFI_MAX_RETRIES 5
+#define WIFI_REFRESH_UNIT_VERSION 2
 
 static bool s_initialized;
 static bool s_should_reconnect;
@@ -53,14 +54,22 @@ static uint16_t clamp_refresh_minutes(uint16_t value, uint16_t fallback)
     return value;
 }
 
+static uint16_t clamp_refresh_seconds(uint16_t value, uint16_t fallback)
+{
+    if(value < WIFI_SETTINGS_MIN_REFRESH_SECONDS || value > WIFI_SETTINGS_MAX_REFRESH_SECONDS) {
+        return fallback;
+    }
+    return value;
+}
+
 static void set_default_preferences(app_preferences_t *prefs)
 {
     memset(prefs, 0, sizeof(*prefs));
     prefs->orientation = 2;
     prefs->brightness = 100;
     prefs->weather_refresh_minutes = 30;
-    prefs->bus_refresh_minutes = 2;
-    prefs->subway_refresh_minutes = 2;
+    prefs->bus_refresh_seconds = 120;
+    prefs->subway_refresh_seconds = 120;
     prefs->finance_refresh_minutes = 15;
     strlcpy(prefs->timezone, "KST-9", sizeof(prefs->timezone));
     strlcpy(prefs->weather_location, "37.5665,126.9780", sizeof(prefs->weather_location));
@@ -84,8 +93,8 @@ void wifi_settings_sanitize_preferences(app_preferences_t *prefs)
     }
 
     prefs->weather_refresh_minutes = clamp_refresh_minutes(prefs->weather_refresh_minutes, 30);
-    prefs->bus_refresh_minutes = clamp_refresh_minutes(prefs->bus_refresh_minutes, 2);
-    prefs->subway_refresh_minutes = clamp_refresh_minutes(prefs->subway_refresh_minutes, 2);
+    prefs->bus_refresh_seconds = clamp_refresh_seconds(prefs->bus_refresh_seconds, 120);
+    prefs->subway_refresh_seconds = clamp_refresh_seconds(prefs->subway_refresh_seconds, 120);
     prefs->finance_refresh_minutes = clamp_refresh_minutes(prefs->finance_refresh_minutes, 15);
 
     if(prefs->timezone[0] == '\0') {
@@ -199,6 +208,7 @@ esp_err_t wifi_settings_load_preferences(app_preferences_t *prefs)
 
     nvs_handle_t handle;
     esp_err_t err = open_namespace(&handle, NVS_READONLY);
+    bool legacy_refresh_units = false;
     if(err == ESP_ERR_NVS_NOT_FOUND) {
         return ESP_OK;
     }
@@ -244,16 +254,16 @@ esp_err_t wifi_settings_load_preferences(app_preferences_t *prefs)
         prefs->weather_refresh_minutes = value;
     }
     if(err == ESP_OK) {
-        uint16_t value = prefs->bus_refresh_minutes;
+        uint16_t value = prefs->bus_refresh_seconds;
         err = nvs_get_u16(handle, "busint", &value);
         if(err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
-        prefs->bus_refresh_minutes = value;
+        prefs->bus_refresh_seconds = value;
     }
     if(err == ESP_OK) {
-        uint16_t value = prefs->subway_refresh_minutes;
+        uint16_t value = prefs->subway_refresh_seconds;
         err = nvs_get_u16(handle, "subint", &value);
         if(err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
-        prefs->subway_refresh_minutes = value;
+        prefs->subway_refresh_seconds = value;
     }
     if(err == ESP_OK) {
         uint16_t value = prefs->finance_refresh_minutes;
@@ -261,10 +271,25 @@ esp_err_t wifi_settings_load_preferences(app_preferences_t *prefs)
         if(err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
         prefs->finance_refresh_minutes = value;
     }
+    if(err == ESP_OK) {
+        uint8_t value = 0;
+        err = nvs_get_u8(handle, "rver", &value);
+        if(err == ESP_ERR_NVS_NOT_FOUND) {
+            err = ESP_OK;
+            legacy_refresh_units = true;
+        }
+    }
 
     nvs_close(handle);
     if(err == ESP_OK) {
+        if(legacy_refresh_units) {
+            prefs->bus_refresh_seconds *= 60;
+            prefs->subway_refresh_seconds *= 60;
+        }
         wifi_settings_sanitize_preferences(prefs);
+        if(legacy_refresh_units) {
+            err = wifi_settings_save_preferences(prefs);
+        }
     }
     return err;
 }
@@ -292,9 +317,10 @@ esp_err_t wifi_settings_save_preferences(const app_preferences_t *prefs)
     if(err == ESP_OK) err = write_string(handle, "subway", sanitized.subway_station);
     if(err == ESP_OK) err = write_string(handle, "ticker", sanitized.finance_ticker);
     if(err == ESP_OK) err = nvs_set_u16(handle, "wxint", sanitized.weather_refresh_minutes);
-    if(err == ESP_OK) err = nvs_set_u16(handle, "busint", sanitized.bus_refresh_minutes);
-    if(err == ESP_OK) err = nvs_set_u16(handle, "subint", sanitized.subway_refresh_minutes);
+    if(err == ESP_OK) err = nvs_set_u16(handle, "busint", sanitized.bus_refresh_seconds);
+    if(err == ESP_OK) err = nvs_set_u16(handle, "subint", sanitized.subway_refresh_seconds);
     if(err == ESP_OK) err = nvs_set_u16(handle, "finint", sanitized.finance_refresh_minutes);
+    if(err == ESP_OK) err = nvs_set_u8(handle, "rver", WIFI_REFRESH_UNIT_VERSION);
     if(err == ESP_OK) err = nvs_commit(handle);
 
     nvs_close(handle);

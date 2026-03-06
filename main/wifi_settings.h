@@ -15,6 +15,8 @@
 #define WIFI_SETTINGS_TICKER_MAX_LEN 16
 #define WIFI_SETTINGS_MIN_REFRESH_MINUTES 1
 #define WIFI_SETTINGS_MAX_REFRESH_MINUTES 240
+#define WIFI_SETTINGS_MIN_REFRESH_SECONDS 1
+#define WIFI_SETTINGS_MAX_REFRESH_SECONDS 3600
 
 typedef enum {
     WIFI_CONNECTION_IDLE = 0,
@@ -34,8 +36,8 @@ typedef struct {
     uint8_t orientation;
     uint8_t brightness;
     uint16_t weather_refresh_minutes;
-    uint16_t bus_refresh_minutes;
-    uint16_t subway_refresh_minutes;
+    uint16_t bus_refresh_seconds;
+    uint16_t subway_refresh_seconds;
     uint16_t finance_refresh_minutes;
 } app_preferences_t;
 

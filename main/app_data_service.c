@@ -18,6 +18,7 @@
 
 #define BUS_API_KEY "ptRjIMHrjuCyMweSf4pkfDr605tdaww0uy5XABjuE9Jj0bWy59X0XGKDidiwwdBsweO2kGFoJX5IiWwyJV7c%2Fw%3D%3D"
 #define SUBWAY_API_KEY "7342777a6d65746836354d424c6947"
+#define APP_DATA_TASK_STACK_SIZE 12288
 
 typedef struct {
     char *data;
@@ -140,13 +141,6 @@ static const char *weather_icon_for_code(int code)
     return "SKY";
 }
 
-static const char *aqi_face_for_value(int aqi)
-{
-    if(aqi <= 50) return ":)";
-    if(aqi <= 100) return ":|";
-    return "MASK";
-}
-
 static void url_encode(char *dst, size_t dst_len, const char *src)
 {
     static const char hex[] = "0123456789ABCDEF";
@@ -204,6 +198,17 @@ static const char *find_tag_value(const char *start, const char *end, const char
     memcpy(out, value_start, len);
     out[len] = '\0';
     return out;
+}
+
+static void set_subway_status(app_data_snapshot_t *snapshot, const char *station_name, const char *summary, const char *detail)
+{
+    snapshot->subway_count = 1;
+    snapshot->subway_valid = true;
+    strlcpy(snapshot->station_name, station_name ? station_name : "", sizeof(snapshot->station_name));
+    strlcpy(snapshot->subway_items[0].line, summary ? summary : "", sizeof(snapshot->subway_items[0].line));
+    strlcpy(snapshot->subway_items[0].arrival, detail ? detail : "", sizeof(snapshot->subway_items[0].arrival));
+    snapshot->subway_items[0].destination[0] = '\0';
+    snapshot->subway_updated_at = time(NULL);
 }
 
 static esp_err_t fetch_weather_data(const app_preferences_t *prefs, app_data_snapshot_t *snapshot)
@@ -270,14 +275,21 @@ static esp_err_t fetch_weather_data(const app_preferences_t *prefs, app_data_sna
     double pm10 = cJSON_GetNumberValue(cJSON_GetObjectItem(aqi_current, "pm10"));
     double pm25 = cJSON_GetNumberValue(cJSON_GetObjectItem(aqi_current, "pm2_5"));
 
+    snapshot->weather_code = weather_code;
+    snapshot->weather_current_temp = (int16_t)current_temp;
+    snapshot->weather_min_temp = (int16_t)min_temp;
+    snapshot->weather_max_temp = (int16_t)max_temp;
     strlcpy(snapshot->weather_target, day_index == 0 ? "TODAY" : "TOMORROW", sizeof(snapshot->weather_target));
     strlcpy(snapshot->weather_icon, weather_icon_for_code(weather_code), sizeof(snapshot->weather_icon));
     snprintf(snapshot->weather_summary, sizeof(snapshot->weather_summary), "%s %s", snapshot->weather_target,
              snapshot->weather_icon);
     snprintf(snapshot->weather_temp, sizeof(snapshot->weather_temp), "Now %dC  Low %dC  High %dC",
              current_temp, min_temp, max_temp);
-    snprintf(snapshot->air_quality, sizeof(snapshot->air_quality), "AQI %d %s  PM10 %.1f  PM2.5 %.1f",
-             aqi, aqi_face_for_value(aqi), pm10, pm25);
+    snapshot->air_quality_index = aqi;
+    snapshot->air_pm10 = (float)pm10;
+    snapshot->air_pm25 = (float)pm25;
+    snprintf(snapshot->air_quality, sizeof(snapshot->air_quality), "AQI %d\nPM10 %.1f  PM2.5 %.1f",
+             aqi, pm10, pm25);
     snapshot->weather_valid = true;
     snapshot->weather_updated_at = now;
 
@@ -372,7 +384,7 @@ static esp_err_t fetch_subway_data(const app_preferences_t *prefs, app_data_snap
     snapshot->station_name[0] = '\0';
 
     cJSON *arrivals = cJSON_GetObjectItem(root, "realtimeArrivalList");
-    if(cJSON_IsArray(arrivals)) {
+    if(cJSON_IsArray(arrivals) && cJSON_GetArraySize(arrivals) > 0) {
         cJSON *item = NULL;
         cJSON_ArrayForEach(item, arrivals) {
             if(snapshot->subway_count >= APP_MAX_SUBWAY_ITEMS) {
@@ -394,6 +406,13 @@ static esp_err_t fetch_subway_data(const app_preferences_t *prefs, app_data_snap
                 strlcpy(out->arrival, arrival, sizeof(out->arrival));
                 strlcpy(out->destination, dest ? dest : "", sizeof(out->destination));
             }
+        }
+    } else {
+        const char *code = cJSON_GetStringValue(cJSON_GetObjectItem(root, "code"));
+        if(code != NULL && strcmp(code, "INFO-200") == 0) {
+            set_subway_status(snapshot, prefs->subway_station, "No live arrivals", "Check again later");
+            cJSON_Delete(root);
+            return ESP_OK;
         }
     }
 
@@ -473,6 +492,17 @@ static void refresh_requested_data(const app_preferences_t *prefs, app_data_snap
 {
     if(flags & APP_REFRESH_WEATHER) {
         if(fetch_weather_data(prefs, snapshot) != ESP_OK) {
+            snapshot->weather_valid = false;
+            snapshot->weather_code = 0;
+            snapshot->weather_current_temp = 0;
+            snapshot->weather_min_temp = 0;
+            snapshot->weather_max_temp = 0;
+            snapshot->air_quality_index = 0;
+            snapshot->air_pm10 = 0.0f;
+            snapshot->air_pm25 = 0.0f;
+            snapshot->weather_temp[0] = '\0';
+            snapshot->air_quality[0] = '\0';
+            snapshot->weather_updated_at = 0;
             strlcpy(snapshot->weather_summary, "Weather fetch failed", sizeof(snapshot->weather_summary));
         }
     }
@@ -500,14 +530,22 @@ static void data_task(void *arg)
 {
     (void)arg;
 
+    app_preferences_t *prefs = malloc(sizeof(*prefs));
+    app_data_snapshot_t *next_snapshot = malloc(sizeof(*next_snapshot));
+    if(prefs == NULL || next_snapshot == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate data task buffers");
+        free(prefs);
+        free(next_snapshot);
+        vTaskDelete(NULL);
+        return;
+    }
+
     while(true) {
-        app_preferences_t prefs;
-        app_data_snapshot_t next_snapshot;
         uint32_t flags = APP_REFRESH_NONE;
 
         xSemaphoreTake(s_mutex, portMAX_DELAY);
-        prefs = s_preferences;
-        next_snapshot = s_snapshot;
+        *prefs = s_preferences;
+        *next_snapshot = s_snapshot;
         if(s_wifi_ready && s_pending_refresh_flags != APP_REFRESH_NONE) {
             flags = s_pending_refresh_flags;
             s_pending_refresh_flags = APP_REFRESH_NONE;
@@ -515,9 +553,9 @@ static void data_task(void *arg)
         xSemaphoreGive(s_mutex);
 
         if(flags != APP_REFRESH_NONE) {
-            refresh_requested_data(&prefs, &next_snapshot, flags);
+            refresh_requested_data(prefs, next_snapshot, flags);
             xSemaphoreTake(s_mutex, portMAX_DELAY);
-            s_snapshot = next_snapshot;
+            s_snapshot = *next_snapshot;
             xSemaphoreGive(s_mutex);
         }
 
@@ -544,7 +582,7 @@ esp_err_t app_data_service_init(const app_preferences_t *prefs)
 
     apply_timezone(prefs->timezone);
 
-    BaseType_t created = xTaskCreate(data_task, "app_data_task", 8192, NULL, 5, &s_task);
+    BaseType_t created = xTaskCreate(data_task, "app_data_task", APP_DATA_TASK_STACK_SIZE, NULL, 5, &s_task);
     return created == pdPASS ? ESP_OK : ESP_FAIL;
 }
 

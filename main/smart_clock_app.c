@@ -11,7 +11,14 @@
 #include "settings_web_server.h"
 #include "wifi_settings.h"
 
+LV_FONT_DECLARE(lv_font_korean_9);
+LV_FONT_DECLARE(lv_font_korean_10);
+LV_FONT_DECLARE(lv_font_korean_11);
+LV_FONT_DECLARE(lv_font_korean_12);
+
 #define QUOTA_TAB_TIMEOUT_US (30LL * 60LL * 1000000LL)
+#define WEATHER_CANVAS_SIZE 120
+#define AIR_QUALITY_CANVAS_SIZE 120
 
 enum {
     TAB_TIME = 0,
@@ -35,9 +42,12 @@ static lv_obj_t *s_brightness_value_label;
 static lv_obj_t *s_ssid_input;
 static lv_obj_t *s_password_input;
 static lv_obj_t *s_web_hint_label;
-static lv_obj_t *s_date_label;
+static lv_obj_t *s_digital_date_label;
+static lv_obj_t *s_digital_time_label;
+static lv_obj_t *s_weather_canvas;
 static lv_obj_t *s_weather_summary_label;
 static lv_obj_t *s_weather_temp_label;
+static lv_obj_t *s_air_quality_canvas;
 static lv_obj_t *s_air_quality_label;
 static lv_obj_t *s_weather_updated_label;
 static lv_obj_t *s_bus_title_label;
@@ -49,9 +59,6 @@ static lv_obj_t *s_finance_price_label;
 static lv_obj_t *s_finance_updated_label;
 static lv_obj_t *s_finance_chart;
 static lv_chart_series_t *s_finance_series;
-static lv_obj_t *s_perf_panel;
-static lv_obj_t *s_perf_time_label;
-static lv_obj_t *s_perf_stats_label;
 static lv_obj_t *s_bus_labels[APP_MAX_BUS_ITEMS];
 static lv_obj_t *s_subway_labels[APP_MAX_SUBWAY_ITEMS];
 static lv_timer_t *s_ui_timer;
@@ -64,6 +71,8 @@ static app_preferences_t s_preferences;
 static bool s_last_wifi_ready;
 static uint32_t s_last_tab = TAB_SETTINGS;
 static int64_t s_quota_tab_entered_at;
+static int s_weather_visual_code = -1;
+static int s_air_quality_visual_value = -1;
 
 static void textarea_event_cb(lv_event_t *e)
 {
@@ -91,6 +100,7 @@ static lv_obj_t *create_card(lv_obj_t *parent, const char *title)
     lv_obj_set_layout(card, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *title_label = lv_label_create(card);
     lv_label_set_text(title_label, title);
@@ -112,6 +122,303 @@ static lv_obj_t *create_labeled_textarea(lv_obj_t *parent, const char *label_tex
     return textarea;
 }
 
+static void style_plain_container(lv_obj_t *obj)
+{
+    lv_obj_set_style_pad_all(obj, 0, 0);
+    lv_obj_set_style_border_width(obj, 0, 0);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+static void configure_scrollable_tab(lv_obj_t *tab)
+{
+    lv_obj_add_flag(tab, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(tab, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(tab, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_pad_right(tab, 18, 0);
+    lv_obj_set_style_width(tab, 6, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(tab, LV_RADIUS_CIRCLE, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(tab, lv_palette_lighten(LV_PALETTE_BLUE_GREY, 2), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(tab, LV_OPA_70, LV_PART_SCROLLBAR);
+}
+
+static void apply_korean_font(lv_obj_t *obj, const lv_font_t *font)
+{
+    lv_obj_set_style_text_font(obj, font, 0);
+}
+
+static lv_obj_t *create_visual_panel(lv_obj_t *parent, const char *title)
+{
+    lv_obj_t *panel = lv_obj_create(parent);
+    lv_obj_set_size(panel, 216, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_all(panel, 12, 0);
+    lv_obj_set_style_pad_gap(panel, 8, 0);
+    lv_obj_set_style_radius(panel, 12, 0);
+    lv_obj_set_layout(panel, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(panel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title_label = lv_label_create(panel);
+    lv_label_set_text(title_label, title);
+    lv_obj_set_style_text_color(title_label, lv_palette_main(LV_PALETTE_BLUE), 0);
+    return panel;
+}
+
+static void format_digital_clock(struct tm *time_info, char *date_buf, size_t date_buf_len, char *time_buf, size_t time_buf_len)
+{
+    static const char *weekday_names[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    static const char *month_names[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    int hour = time_info->tm_hour % 12;
+    if(hour == 0) {
+        hour = 12;
+    }
+
+    snprintf(date_buf, date_buf_len, "%s %s %d",
+             weekday_names[time_info->tm_wday],
+             month_names[time_info->tm_mon],
+             time_info->tm_mday);
+    snprintf(time_buf, time_buf_len, "%d%s%02d", hour, (time_info->tm_sec % 2) == 0 ? ":" : " ", time_info->tm_min);
+}
+
+static const char *weather_description_for_code(int code)
+{
+    if(code == 0) return "Clear";
+    if(code <= 3) return "Cloudy";
+    if(code == 45 || code == 48) return "Fog";
+    if((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return "Rain";
+    if(code >= 71 && code <= 77) return "Snow";
+    if(code >= 95) return "Storm";
+    return "Sky";
+}
+
+static const char *air_quality_description_for_value(int aqi)
+{
+    if(aqi <= 50) return "Good";
+    if(aqi <= 100) return "Moderate";
+    return "Bad";
+}
+
+static void draw_icon_rect(lv_draw_ctx_t *draw_ctx, lv_coord_t ox, lv_coord_t oy,
+                           lv_coord_t x, lv_coord_t y, lv_coord_t w, lv_coord_t h,
+                           lv_coord_t radius, lv_color_t color, lv_opa_t opa,
+                           lv_coord_t border_width, lv_color_t border_color)
+{
+    lv_draw_rect_dsc_t rect_dsc;
+    lv_area_t coords = {
+        .x1 = ox + x,
+        .y1 = oy + y,
+        .x2 = ox + x + w - 1,
+        .y2 = oy + y + h - 1,
+    };
+
+    lv_draw_rect_dsc_init(&rect_dsc);
+    rect_dsc.radius = radius;
+    rect_dsc.bg_color = color;
+    rect_dsc.bg_opa = opa;
+    rect_dsc.border_width = border_width;
+    rect_dsc.border_color = border_color;
+    rect_dsc.border_opa = border_width > 0 ? LV_OPA_COVER : LV_OPA_TRANSP;
+    rect_dsc.shadow_width = 0;
+    lv_draw_rect(draw_ctx, &rect_dsc, &coords);
+}
+
+static void draw_icon_circle(lv_draw_ctx_t *draw_ctx, lv_coord_t ox, lv_coord_t oy,
+                             lv_coord_t x, lv_coord_t y, lv_coord_t diameter,
+                             lv_color_t color, lv_opa_t opa)
+{
+    draw_icon_rect(draw_ctx, ox, oy, x, y, diameter, diameter, LV_RADIUS_CIRCLE, color, opa, 0, color);
+}
+
+static void draw_icon_line(lv_draw_ctx_t *draw_ctx, lv_coord_t ox, lv_coord_t oy,
+                           lv_coord_t x1, lv_coord_t y1, lv_coord_t x2, lv_coord_t y2,
+                           lv_color_t color, lv_coord_t width)
+{
+    lv_draw_line_dsc_t line_dsc;
+    lv_point_t p1 = {.x = ox + x1, .y = oy + y1};
+    lv_point_t p2 = {.x = ox + x2, .y = oy + y2};
+
+    lv_draw_line_dsc_init(&line_dsc);
+    line_dsc.color = color;
+    line_dsc.width = width;
+    line_dsc.round_end = 1;
+    line_dsc.round_start = 1;
+    lv_draw_line(draw_ctx, &line_dsc, &p1, &p2);
+}
+
+static void draw_icon_arc(lv_draw_ctx_t *draw_ctx, lv_coord_t ox, lv_coord_t oy,
+                          lv_coord_t center_x, lv_coord_t center_y, lv_coord_t radius,
+                          int32_t start_angle, int32_t end_angle, lv_color_t color, lv_coord_t width)
+{
+    lv_draw_arc_dsc_t arc_dsc;
+    lv_point_t center = {.x = ox + center_x, .y = oy + center_y};
+
+    lv_draw_arc_dsc_init(&arc_dsc);
+    arc_dsc.color = color;
+    arc_dsc.width = width;
+    arc_dsc.rounded = 1;
+    lv_draw_arc(draw_ctx, &arc_dsc, &center, radius, start_angle, end_angle);
+}
+
+static void draw_weather_cloud(lv_draw_ctx_t *draw_ctx, lv_coord_t ox, lv_coord_t oy,
+                               lv_coord_t x, lv_coord_t y, lv_color_t color)
+{
+    draw_icon_circle(draw_ctx, ox, oy, x + 4, y + 18, 28, color, LV_OPA_COVER);
+    draw_icon_circle(draw_ctx, ox, oy, x + 24, y + 6, 34, color, LV_OPA_COVER);
+    draw_icon_circle(draw_ctx, ox, oy, x + 50, y + 18, 30, color, LV_OPA_COVER);
+    draw_icon_rect(draw_ctx, ox, oy, x + 14, y + 28, 54, 20, 10, color, LV_OPA_COVER, 0, color);
+}
+
+static void draw_weather_sun(lv_draw_ctx_t *draw_ctx, lv_coord_t ox, lv_coord_t oy)
+{
+    lv_color_t sun_color = lv_palette_main(LV_PALETTE_AMBER);
+    draw_icon_circle(draw_ctx, ox, oy, 26, 18, 38, sun_color, LV_OPA_COVER);
+
+    for(int i = 0; i < 8; ++i) {
+        static const lv_point_t ray_offsets[8][2] = {
+            {{45, 4}, {45, 14}}, {{59, 12}, {53, 20}}, {{67, 36}, {57, 36}}, {{59, 59}, {52, 52}},
+            {{45, 68}, {45, 58}}, {{31, 59}, {37, 52}}, {{22, 36}, {32, 36}}, {{31, 12}, {37, 20}},
+        };
+        draw_icon_line(draw_ctx, ox, oy,
+                       ray_offsets[i][0].x, ray_offsets[i][0].y,
+                       ray_offsets[i][1].x, ray_offsets[i][1].y,
+                       sun_color, 4);
+    }
+}
+
+static void draw_weather_icon(lv_draw_ctx_t *draw_ctx, lv_coord_t ox, lv_coord_t oy, int weather_code)
+{
+    lv_color_t cloud_light = lv_palette_lighten(LV_PALETTE_BLUE_GREY, 4);
+    lv_color_t cloud_dark = lv_palette_darken(LV_PALETTE_BLUE_GREY, 1);
+    lv_color_t water = lv_palette_main(LV_PALETTE_BLUE);
+
+    if(weather_code == 0) {
+        draw_weather_sun(draw_ctx, ox, oy);
+        return;
+    }
+
+    if(weather_code <= 3) {
+        draw_weather_sun(draw_ctx, ox, oy);
+        draw_weather_cloud(draw_ctx, ox, oy, 24, 38, cloud_light);
+        return;
+    }
+
+    if(weather_code == 45 || weather_code == 48) {
+        draw_weather_cloud(draw_ctx, ox, oy, 22, 28, cloud_light);
+        for(int i = 0; i < 3; ++i) {
+            draw_icon_line(draw_ctx, ox, oy, 26, 74 + (i * 10), 92, 74 + (i * 10),
+                           lv_palette_lighten(LV_PALETTE_BLUE_GREY, 2), 4);
+        }
+        return;
+    }
+
+    if((weather_code >= 51 && weather_code <= 67) || (weather_code >= 80 && weather_code <= 82)) {
+        draw_weather_cloud(draw_ctx, ox, oy, 22, 28, cloud_dark);
+        draw_icon_line(draw_ctx, ox, oy, 38, 80, 32, 96, water, 4);
+        draw_icon_line(draw_ctx, ox, oy, 58, 80, 52, 96, water, 4);
+        draw_icon_line(draw_ctx, ox, oy, 78, 80, 72, 96, water, 4);
+        return;
+    }
+
+    if(weather_code >= 71 && weather_code <= 77) {
+        draw_weather_cloud(draw_ctx, ox, oy, 22, 28, cloud_light);
+        for(int i = 0; i < 3; ++i) {
+            lv_coord_t x = 36 + (i * 20);
+            lv_coord_t y = 82;
+            draw_icon_line(draw_ctx, ox, oy, x - 4, y, x + 4, y, lv_color_white(), 3);
+            draw_icon_line(draw_ctx, ox, oy, x, y - 4, x, y + 4, lv_color_white(), 3);
+            draw_icon_line(draw_ctx, ox, oy, x - 3, y - 3, x + 3, y + 3, lv_color_white(), 2);
+            draw_icon_line(draw_ctx, ox, oy, x - 3, y + 3, x + 3, y - 3, lv_color_white(), 2);
+        }
+        return;
+    }
+
+    if(weather_code >= 95) {
+        draw_weather_cloud(draw_ctx, ox, oy, 18, 22, cloud_dark);
+        draw_icon_line(draw_ctx, ox, oy, 54, 66, 44, 86, lv_palette_main(LV_PALETTE_YELLOW), 5);
+        draw_icon_line(draw_ctx, ox, oy, 44, 86, 58, 86, lv_palette_main(LV_PALETTE_YELLOW), 5);
+        draw_icon_line(draw_ctx, ox, oy, 58, 86, 46, 104, lv_palette_main(LV_PALETTE_YELLOW), 5);
+        draw_icon_line(draw_ctx, ox, oy, 34, 78, 28, 96, water, 3);
+        draw_icon_line(draw_ctx, ox, oy, 78, 78, 72, 96, water, 3);
+        return;
+    }
+
+    draw_weather_sun(draw_ctx, ox, oy);
+    draw_weather_cloud(draw_ctx, ox, oy, 26, 40, cloud_light);
+}
+
+static void draw_air_quality_face(lv_draw_ctx_t *draw_ctx, lv_coord_t ox, lv_coord_t oy, int aqi)
+{
+    lv_color_t face_color = lv_color_hex(0xFFD9B3);
+    lv_color_t eye_color = lv_color_hex(0x202020);
+    lv_color_t mask_color = lv_color_hex(0xD9EEF8);
+
+    draw_icon_circle(draw_ctx, ox, oy, 14, 14, 92, face_color, LV_OPA_COVER);
+    draw_icon_circle(draw_ctx, ox, oy, 37, 40, 10, eye_color, LV_OPA_COVER);
+    draw_icon_circle(draw_ctx, ox, oy, 73, 40, 10, eye_color, LV_OPA_COVER);
+
+    if(aqi <= 50) {
+        draw_icon_arc(draw_ctx, ox, oy, 60, 58, 22, 20, 160, eye_color, 4);
+        return;
+    }
+
+    if(aqi <= 100) {
+        draw_icon_line(draw_ctx, ox, oy, 38, 78, 82, 78, eye_color, 4);
+        return;
+    }
+
+    draw_icon_line(draw_ctx, ox, oy, 30, 28, 44, 22, eye_color, 4);
+    draw_icon_line(draw_ctx, ox, oy, 76, 22, 90, 28, eye_color, 4);
+    draw_icon_line(draw_ctx, ox, oy, 32, 46, 44, 42, eye_color, 4);
+    draw_icon_line(draw_ctx, ox, oy, 76, 42, 88, 46, eye_color, 4);
+    draw_icon_rect(draw_ctx, ox, oy, 28, 60, 64, 24, 8, mask_color, LV_OPA_COVER, 2, lv_palette_main(LV_PALETTE_BLUE));
+    draw_icon_line(draw_ctx, ox, oy, 18, 68, 28, 66, lv_palette_main(LV_PALETTE_BLUE), 3);
+    draw_icon_line(draw_ctx, ox, oy, 92, 66, 102, 68, lv_palette_main(LV_PALETTE_BLUE), 3);
+}
+
+static void weather_icon_draw_event_cb(lv_event_t *e)
+{
+    if(lv_event_get_code(e) != LV_EVENT_DRAW_MAIN || s_weather_visual_code < 0) {
+        return;
+    }
+
+    lv_obj_t *obj = lv_event_get_target(e);
+    lv_draw_ctx_t *draw_ctx = lv_event_get_draw_ctx(e);
+    lv_area_t coords;
+    lv_obj_get_content_coords(obj, &coords);
+    draw_weather_icon(draw_ctx, coords.x1, coords.y1, s_weather_visual_code);
+}
+
+static void air_quality_icon_draw_event_cb(lv_event_t *e)
+{
+    if(lv_event_get_code(e) != LV_EVENT_DRAW_MAIN || s_air_quality_visual_value < 0) {
+        return;
+    }
+
+    lv_obj_t *obj = lv_event_get_target(e);
+    lv_draw_ctx_t *draw_ctx = lv_event_get_draw_ctx(e);
+    lv_area_t coords;
+    lv_obj_get_content_coords(obj, &coords);
+    draw_air_quality_face(draw_ctx, coords.x1, coords.y1, s_air_quality_visual_value);
+}
+
+static void clock_meter_draw_event_cb(lv_event_t *e)
+{
+    if(lv_event_get_code(e) != LV_EVENT_DRAW_PART_BEGIN) {
+        return;
+    }
+
+    lv_obj_draw_part_dsc_t *dsc = lv_event_get_draw_part_dsc(e);
+    if(dsc == NULL || !lv_obj_draw_part_check_type(dsc, &lv_meter_class, LV_METER_DRAW_PART_TICK)) {
+        return;
+    }
+
+    if(dsc->text != NULL) {
+        dsc->text[0] = '\0';
+    }
+}
+
 static void format_update_time(char *buffer, size_t buffer_len, time_t timestamp)
 {
     if(timestamp == 0) {
@@ -124,9 +431,14 @@ static void format_update_time(char *buffer, size_t buffer_len, time_t timestamp
     strftime(buffer, buffer_len, "@%H:%M", &time_info);
 }
 
-static bool refresh_due(time_t now, time_t last_update, uint16_t minutes)
+static bool refresh_due_minutes(time_t now, time_t last_update, uint16_t minutes)
 {
     return last_update == 0 || (now - last_update) >= (time_t)(minutes * 60);
+}
+
+static bool refresh_due_seconds(time_t now, time_t last_update, uint16_t seconds)
+{
+    return last_update == 0 || (now - last_update) >= (time_t)seconds;
 }
 
 static void apply_tab_lock(bool connected)
@@ -245,65 +557,101 @@ static void tabview_event_cb(lv_event_t *e)
     }
 }
 
-static void create_perf_panel(void)
-{
-    s_perf_panel = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(s_perf_panel, 110, LV_SIZE_CONTENT);
-    lv_obj_align(s_perf_panel, LV_ALIGN_TOP_RIGHT, -6, 6);
-    lv_obj_set_style_pad_all(s_perf_panel, 6, 0);
-    lv_obj_set_style_radius(s_perf_panel, 8, 0);
-    lv_obj_set_style_bg_opa(s_perf_panel, LV_OPA_70, 0);
-    lv_obj_set_style_bg_color(s_perf_panel, lv_color_black(), 0);
-    lv_obj_set_style_border_width(s_perf_panel, 0, 0);
-    lv_obj_clear_flag(s_perf_panel, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_layout(s_perf_panel, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(s_perf_panel, LV_FLEX_FLOW_COLUMN);
-
-    s_perf_time_label = lv_label_create(s_perf_panel);
-    lv_obj_set_style_text_color(s_perf_time_label, lv_color_white(), 0);
-    s_perf_stats_label = lv_label_create(s_perf_panel);
-    lv_obj_set_style_text_color(s_perf_stats_label, lv_color_white(), 0);
-}
-
 static void populate_time_tab(lv_obj_t *tab)
 {
     lv_obj_set_style_pad_all(tab, 12, 0);
+    lv_obj_set_style_pad_gap(tab, 12, 0);
     lv_obj_set_layout(tab, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(tab, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(tab, LV_OBJ_FLAG_SCROLLABLE);
+    configure_scrollable_tab(tab);
 
-    lv_obj_t *card = create_card(tab, "Clock");
-    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *clock_card = lv_obj_create(tab);
+    lv_obj_set_size(clock_card, 224, 224);
+    lv_obj_set_style_pad_all(clock_card, 8, 0);
+    lv_obj_set_style_radius(clock_card, 16, 0);
+    lv_obj_clear_flag(clock_card, LV_OBJ_FLAG_SCROLLABLE);
 
-    s_clock_meter = lv_meter_create(card);
-    lv_obj_set_size(s_clock_meter, 210, 210);
+    s_clock_meter = lv_meter_create(clock_card);
+    lv_obj_center(s_clock_meter);
+    lv_obj_set_size(s_clock_meter, 208, 208);
+    lv_obj_set_style_bg_opa(s_clock_meter, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_clock_meter, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_clock_meter, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_width(s_clock_meter, 12, LV_PART_INDICATOR);
+    lv_obj_set_style_height(s_clock_meter, 12, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s_clock_meter, lv_color_black(), LV_PART_INDICATOR);
+    lv_obj_set_style_border_width(s_clock_meter, 0, LV_PART_INDICATOR);
+    lv_obj_add_event_cb(s_clock_meter, clock_meter_draw_event_cb, LV_EVENT_DRAW_PART_BEGIN, NULL);
+
     lv_meter_scale_t *scale = lv_meter_add_scale(s_clock_meter);
-    lv_meter_set_scale_ticks(s_clock_meter, scale, 60, 2, 10, lv_palette_main(LV_PALETTE_GREY));
-    lv_meter_set_scale_major_ticks(s_clock_meter, scale, 12, 4, 18, lv_color_black(), 10);
+    lv_meter_set_scale_ticks(s_clock_meter, scale, 60, 2, 10, lv_palette_lighten(LV_PALETTE_BLUE_GREY, 2));
+    lv_meter_set_scale_major_ticks(s_clock_meter, scale, 5, 4, 18, lv_color_black(), 12);
     lv_meter_set_scale_range(s_clock_meter, scale, 0, 60, 360, 270);
-    s_hour_indic = lv_meter_add_needle_line(s_clock_meter, scale, 5, lv_palette_main(LV_PALETTE_BLUE), -20);
-    s_minute_indic = lv_meter_add_needle_line(s_clock_meter, scale, 3, lv_color_black(), -10);
+    s_hour_indic = lv_meter_add_needle_line(s_clock_meter, scale, 6, lv_color_black(), -56);
+    s_minute_indic = lv_meter_add_needle_line(s_clock_meter, scale, 4, lv_palette_darken(LV_PALETTE_GREY, 3), -24);
     s_second_indic = lv_meter_add_needle_line(s_clock_meter, scale, 2, lv_palette_main(LV_PALETTE_RED), 0);
 
-    s_date_label = lv_label_create(card);
-    lv_obj_set_width(s_date_label, LV_PCT(100));
-    lv_obj_set_style_text_align(s_date_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_t *digital_col = lv_obj_create(tab);
+    style_plain_container(digital_col);
+    lv_obj_set_height(digital_col, 224);
+    lv_obj_set_flex_grow(digital_col, 1);
+    lv_obj_set_style_pad_gap(digital_col, 10, 0);
+    lv_obj_set_layout(digital_col, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(digital_col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(digital_col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    s_digital_date_label = lv_label_create(digital_col);
+    lv_obj_set_width(s_digital_date_label, LV_PCT(100));
+    lv_obj_set_style_text_align(s_digital_date_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(s_digital_date_label, &lv_font_montserrat_32, 0);
+    lv_obj_set_style_text_color(s_digital_date_label, lv_palette_darken(LV_PALETTE_BLUE_GREY, 1), 0);
+
+    s_digital_time_label = lv_label_create(digital_col);
+    lv_obj_set_width(s_digital_time_label, LV_PCT(100));
+    lv_obj_set_style_text_align(s_digital_time_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(s_digital_time_label, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(s_digital_time_label, lv_color_black(), 0);
 }
 
 static void populate_weather_tab(lv_obj_t *tab)
 {
     lv_obj_set_style_pad_all(tab, 12, 0);
+    lv_obj_set_style_pad_gap(tab, 12, 0);
     lv_obj_set_layout(tab, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(tab, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_clear_flag(tab, LV_OBJ_FLAG_SCROLLABLE);
+    configure_scrollable_tab(tab);
 
-    lv_obj_t *card = create_card(tab, "Weather and AQI");
-    s_weather_summary_label = lv_label_create(card);
-    s_weather_temp_label = lv_label_create(card);
-    s_air_quality_label = lv_label_create(card);
-    s_weather_updated_label = lv_label_create(card);
+    lv_obj_t *weather_panel = create_visual_panel(tab, "Forecast");
+    s_weather_canvas = lv_obj_create(weather_panel);
+    style_plain_container(s_weather_canvas);
+    lv_obj_set_size(s_weather_canvas, WEATHER_CANVAS_SIZE, WEATHER_CANVAS_SIZE);
+    lv_obj_add_event_cb(s_weather_canvas, weather_icon_draw_event_cb, LV_EVENT_DRAW_MAIN, NULL);
+    s_weather_summary_label = lv_label_create(weather_panel);
+    lv_obj_set_width(s_weather_summary_label, LV_PCT(100));
+    lv_obj_set_style_text_align(s_weather_summary_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(s_weather_summary_label, &lv_font_montserrat_24, 0);
+    s_weather_temp_label = lv_label_create(weather_panel);
+    lv_obj_set_width(s_weather_temp_label, LV_PCT(100));
+    lv_obj_set_style_text_align(s_weather_temp_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_weather_temp_label, LV_LABEL_LONG_WRAP);
+
+    lv_obj_t *air_panel = create_visual_panel(tab, "Air Quality");
+    s_air_quality_canvas = lv_obj_create(air_panel);
+    style_plain_container(s_air_quality_canvas);
+    lv_obj_set_size(s_air_quality_canvas, AIR_QUALITY_CANVAS_SIZE, AIR_QUALITY_CANVAS_SIZE);
+    lv_obj_add_event_cb(s_air_quality_canvas, air_quality_icon_draw_event_cb, LV_EVENT_DRAW_MAIN, NULL);
+    s_air_quality_label = lv_label_create(air_panel);
+    lv_obj_set_width(s_air_quality_label, LV_PCT(100));
+    lv_obj_set_style_text_align(s_air_quality_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_air_quality_label, LV_LABEL_LONG_WRAP);
+
+    s_weather_updated_label = lv_label_create(tab);
+    lv_obj_set_width(s_weather_updated_label, LV_PCT(100));
+    lv_obj_set_style_text_align(s_weather_updated_label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(s_weather_updated_label, lv_palette_darken(LV_PALETTE_GREY, 2), 0);
+    apply_korean_font(s_weather_updated_label, &lv_font_korean_9);
 }
 
 static void populate_bus_tab(lv_obj_t *tab)
@@ -312,15 +660,19 @@ static void populate_bus_tab(lv_obj_t *tab)
     lv_obj_set_layout(tab, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(tab, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    configure_scrollable_tab(tab);
 
     lv_obj_t *card = create_card(tab, "Bus Arrival");
     s_bus_title_label = lv_label_create(card);
+    apply_korean_font(s_bus_title_label, &lv_font_korean_12);
     s_bus_updated_label = lv_label_create(card);
+    apply_korean_font(s_bus_updated_label, &lv_font_korean_10);
 
     for(int i = 0; i < APP_MAX_BUS_ITEMS; ++i) {
         s_bus_labels[i] = lv_label_create(card);
         lv_obj_set_width(s_bus_labels[i], LV_PCT(100));
         lv_label_set_long_mode(s_bus_labels[i], LV_LABEL_LONG_WRAP);
+        apply_korean_font(s_bus_labels[i], &lv_font_korean_11);
     }
 }
 
@@ -330,15 +682,19 @@ static void populate_subway_tab(lv_obj_t *tab)
     lv_obj_set_layout(tab, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(tab, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    configure_scrollable_tab(tab);
 
     lv_obj_t *card = create_card(tab, "Subway Arrival");
     s_subway_title_label = lv_label_create(card);
+    apply_korean_font(s_subway_title_label, &lv_font_korean_12);
     s_subway_updated_label = lv_label_create(card);
+    apply_korean_font(s_subway_updated_label, &lv_font_korean_10);
 
     for(int i = 0; i < APP_MAX_SUBWAY_ITEMS; ++i) {
         s_subway_labels[i] = lv_label_create(card);
         lv_obj_set_width(s_subway_labels[i], LV_PCT(100));
         lv_label_set_long_mode(s_subway_labels[i], LV_LABEL_LONG_WRAP);
+        apply_korean_font(s_subway_labels[i], &lv_font_korean_11);
     }
 }
 
@@ -348,12 +704,13 @@ static void populate_finance_tab(lv_obj_t *tab)
     lv_obj_set_layout(tab, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(tab, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_clear_flag(tab, LV_OBJ_FLAG_SCROLLABLE);
+    configure_scrollable_tab(tab);
 
     lv_obj_t *card = create_card(tab, "Yahoo Finance");
     s_finance_name_label = lv_label_create(card);
     s_finance_price_label = lv_label_create(card);
     s_finance_updated_label = lv_label_create(card);
+    apply_korean_font(s_finance_updated_label, &lv_font_korean_9);
 
     s_finance_chart = lv_chart_create(card);
     lv_obj_set_size(s_finance_chart, LV_PCT(100), 160);
@@ -369,6 +726,7 @@ static void populate_settings_tab(lv_obj_t *tab)
     lv_obj_set_layout(tab, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(tab, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    configure_scrollable_tab(tab);
 
     lv_obj_t *wifi_card = create_card(tab, "Wi-Fi");
     s_ssid_input = create_labeled_textarea(wifi_card, "SSID", "Wi-Fi SSID", false);
@@ -424,21 +782,17 @@ static void update_clock_ui(void)
 {
     time_t now = time(NULL);
     struct tm time_info;
-    char date_text[64];
-    char current_time[16];
+    char date_text[32];
+    char time_text[16];
 
     localtime_r(&now, &time_info);
     lv_meter_set_indicator_value(s_clock_meter, s_hour_indic, (time_info.tm_hour % 12) * 5 + time_info.tm_min / 12);
     lv_meter_set_indicator_value(s_clock_meter, s_minute_indic, time_info.tm_min);
     lv_meter_set_indicator_value(s_clock_meter, s_second_indic, time_info.tm_sec);
 
-    strftime(date_text, sizeof(date_text), "%Y-%m-%d %a", &time_info);
-    strftime(current_time, sizeof(current_time), "[%H:%M]", &time_info);
-    lv_label_set_text(s_date_label, date_text);
-    lv_label_set_text(s_perf_time_label, current_time);
-    lv_label_set_text_fmt(s_perf_stats_label, "FPS %lu\nCPU %u%%",
-                          (unsigned long)lv_refr_get_fps_avg(),
-                          100U - lv_timer_get_idle());
+    format_digital_clock(&time_info, date_text, sizeof(date_text), time_text, sizeof(time_text));
+    lv_label_set_text(s_digital_date_label, date_text);
+    lv_label_set_text(s_digital_time_label, time_text);
 }
 
 static void schedule_due_refreshes(const app_data_snapshot_t *snapshot)
@@ -447,16 +801,17 @@ static void schedule_due_refreshes(const app_data_snapshot_t *snapshot)
     uint32_t flags = APP_REFRESH_NONE;
     uint32_t active_tab = lv_tabview_get_tab_act(s_tabview);
 
-    if(refresh_due(now, snapshot->weather_updated_at, s_preferences.weather_refresh_minutes)) {
+    if(refresh_due_minutes(now, snapshot->weather_updated_at, s_preferences.weather_refresh_minutes)) {
         flags |= APP_REFRESH_WEATHER;
     }
-    if(refresh_due(now, snapshot->finance_updated_at, s_preferences.finance_refresh_minutes)) {
+    if(refresh_due_minutes(now, snapshot->finance_updated_at, s_preferences.finance_refresh_minutes)) {
         flags |= APP_REFRESH_FINANCE;
     }
-    if(active_tab == TAB_BUS && refresh_due(now, snapshot->bus_updated_at, s_preferences.bus_refresh_minutes)) {
+    if(active_tab == TAB_BUS && refresh_due_seconds(now, snapshot->bus_updated_at, s_preferences.bus_refresh_seconds)) {
         flags |= APP_REFRESH_BUS;
     }
-    if(active_tab == TAB_SUBWAY && refresh_due(now, snapshot->subway_updated_at, s_preferences.subway_refresh_minutes)) {
+    if(active_tab == TAB_SUBWAY &&
+       refresh_due_seconds(now, snapshot->subway_updated_at, s_preferences.subway_refresh_seconds)) {
         flags |= APP_REFRESH_SUBWAY;
     }
 
@@ -468,14 +823,42 @@ static void schedule_due_refreshes(const app_data_snapshot_t *snapshot)
 static void update_data_labels(void)
 {
     app_data_snapshot_t snapshot;
+    char weather_text[48];
+    char air_quality_text[96];
     char updated_text[16];
 
     app_data_service_get_snapshot(&snapshot);
 
-    lv_label_set_text(s_weather_summary_label,
-                      snapshot.weather_summary[0] ? snapshot.weather_summary : "Weather pending...");
-    lv_label_set_text(s_weather_temp_label, snapshot.weather_temp[0] ? snapshot.weather_temp : "-");
-    lv_label_set_text(s_air_quality_label, snapshot.air_quality[0] ? snapshot.air_quality : "-");
+    if(snapshot.weather_valid) {
+        snprintf(weather_text, sizeof(weather_text), "%s\n%s",
+                 strcmp(snapshot.weather_target, "TOMORROW") == 0 ? "Tomorrow" : "Today",
+                 weather_description_for_code(snapshot.weather_code));
+        lv_label_set_text(s_weather_summary_label, weather_text);
+        lv_label_set_text_fmt(s_weather_temp_label, "Now %dC\nLow %dC  High %dC",
+                              snapshot.weather_current_temp,
+                              snapshot.weather_min_temp,
+                              snapshot.weather_max_temp);
+        snprintf(air_quality_text, sizeof(air_quality_text), "%s\nAQI %d\nPM10 %.1f  PM2.5 %.1f",
+                 air_quality_description_for_value(snapshot.air_quality_index),
+                 snapshot.air_quality_index,
+                 snapshot.air_pm10,
+                 snapshot.air_pm25);
+        lv_label_set_text(s_air_quality_label, air_quality_text);
+        s_weather_visual_code = snapshot.weather_code;
+        s_air_quality_visual_value = snapshot.air_quality_index;
+        lv_obj_invalidate(s_weather_canvas);
+        lv_obj_invalidate(s_air_quality_canvas);
+    } else {
+        lv_label_set_text(s_weather_summary_label,
+                          snapshot.weather_summary[0] ? snapshot.weather_summary : "Weather pending...");
+        lv_label_set_text(s_weather_temp_label, snapshot.weather_temp[0] ? snapshot.weather_temp : "-");
+        lv_label_set_text(s_air_quality_label, snapshot.air_quality[0] ? snapshot.air_quality : "-");
+        s_weather_visual_code = -1;
+        s_air_quality_visual_value = -1;
+        lv_obj_invalidate(s_weather_canvas);
+        lv_obj_invalidate(s_air_quality_canvas);
+    }
+
     format_update_time(updated_text, sizeof(updated_text), snapshot.weather_updated_at);
     lv_label_set_text(s_weather_updated_label, updated_text);
 
@@ -500,9 +883,13 @@ static void update_data_labels(void)
     lv_label_set_text(s_subway_updated_label, updated_text);
     for(int i = 0; i < APP_MAX_SUBWAY_ITEMS; ++i) {
         if(i < snapshot.subway_count) {
-            lv_label_set_text_fmt(s_subway_labels[i], "%s / %s",
-                                  snapshot.subway_items[i].line,
-                                  snapshot.subway_items[i].arrival);
+            if(snapshot.subway_items[i].arrival[0] != '\0') {
+                lv_label_set_text_fmt(s_subway_labels[i], "%s / %s",
+                                      snapshot.subway_items[i].line,
+                                      snapshot.subway_items[i].arrival);
+            } else {
+                lv_label_set_text(s_subway_labels[i], snapshot.subway_items[i].line);
+            }
         } else {
             lv_label_set_text(s_subway_labels[i], "-");
         }
@@ -635,7 +1022,6 @@ void smart_clock_app_start(void)
     populate_subway_tab(lv_tabview_add_tab(s_tabview, "Subway"));
     populate_finance_tab(lv_tabview_add_tab(s_tabview, "Finance"));
     populate_settings_tab(lv_tabview_add_tab(s_tabview, "Settings"));
-    create_perf_panel();
 
     sync_controls_from_preferences();
     apply_tab_lock(false);

@@ -38,10 +38,17 @@ typedef struct {
     bool bus_valid;
     bool subway_valid;
     bool finance_valid;
+    int weather_code;
+    int16_t weather_current_temp;
+    int16_t weather_min_temp;
+    int16_t weather_max_temp;
     char weather_target[12];
     char weather_icon[12];
     char weather_summary[48];
     char weather_temp[48];
+    int air_quality_index;
+    float air_pm10;
+    float air_pm25;
     char air_quality[48];
     time_t weather_updated_at;
     char stop_name[32];

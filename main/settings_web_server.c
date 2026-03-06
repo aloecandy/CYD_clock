@@ -9,6 +9,11 @@
 
 static const char *TAG = "settings_web_server";
 
+#define SETTINGS_HTML_BUFFER_SIZE 4096
+#define SETTINGS_POST_BODY_MAX_LEN 2048
+#define SETTINGS_HTTPD_STACK_SIZE 8192
+#define SETTINGS_HTTPD_MAX_REQ_HDR_LEN 2048
+
 static httpd_handle_t s_server;
 static bool s_enabled;
 static app_preferences_t s_current_preferences;
@@ -88,11 +93,15 @@ static const char *selected_attr(bool selected)
 
 static esp_err_t root_get_handler(httpd_req_t *req)
 {
-    char html[4096];
+    char *html = malloc(SETTINGS_HTML_BUFFER_SIZE);
+    if(html == NULL) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    }
+
     app_preferences_t prefs = s_current_preferences;
 
     int written = snprintf(
-        html, sizeof(html),
+        html, SETTINGS_HTML_BUFFER_SIZE,
         "<!doctype html><html><head><meta charset='utf-8'><title>Smart Clock Settings</title>"
         "<style>body{font-family:sans-serif;max-width:760px;margin:24px auto;padding:0 16px;}"
         "label{display:block;margin:10px 0 4px;}input,select{width:100%%;padding:10px;font-size:16px;}"
@@ -106,11 +115,11 @@ static esp_err_t root_get_handler(httpd_req_t *req)
         "<label>Timezone</label><input name='timezone' value='%s'><small>Example: KST-9</small>"
         "<label>Weather Region</label><input name='weather_location' value='%s'><small>Format: lat,lon</small>"
         "<label>Bus Stop ARS ID</label><input name='bus_stop_id' value='%s'>"
-        "<label>Subway Station (Korean)</label><input name='subway_station' value='%s'>"
+        "<label>Subway Station</label><input name='subway_station' value='%s'><small>Use the Korean station name.</small>"
         "<label>Yahoo Ticker</label><input name='finance_ticker' value='%s'>"
         "<label>Weather Refresh (min)</label><input name='weather_refresh' type='number' min='1' max='240' value='%u'>"
-        "<label>Bus Refresh While Viewing (min)</label><input name='bus_refresh' type='number' min='1' max='240' value='%u'>"
-        "<label>Subway Refresh While Viewing (min)</label><input name='subway_refresh' type='number' min='1' max='240' value='%u'>"
+        "<label>Bus Refresh While Viewing (sec)</label><input name='bus_refresh' type='number' min='1' max='3600' value='%u'>"
+        "<label>Subway Refresh While Viewing (sec)</label><input name='subway_refresh' type='number' min='1' max='3600' value='%u'>"
         "<label>Finance Refresh (min)</label><input name='finance_refresh' type='number' min='1' max='240' value='%u'>"
         "<button type='submit'>Save</button></form></body></html>",
         prefs.ssid,
@@ -124,27 +133,46 @@ static esp_err_t root_get_handler(httpd_req_t *req)
         prefs.subway_station,
         prefs.finance_ticker,
         prefs.weather_refresh_minutes,
-        prefs.bus_refresh_minutes,
-        prefs.subway_refresh_minutes,
+        prefs.bus_refresh_seconds,
+        prefs.subway_refresh_seconds,
         prefs.finance_refresh_minutes);
 
-    if(written < 0 || written >= (int)sizeof(html)) {
+    if(written < 0 || written >= SETTINGS_HTML_BUFFER_SIZE) {
+        free(html);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "HTML buffer too small");
     }
 
     httpd_resp_set_type(req, "text/html; charset=utf-8");
-    return httpd_resp_send(req, html, HTTPD_RESP_USE_STRLEN);
+    esp_err_t err = httpd_resp_send(req, html, HTTPD_RESP_USE_STRLEN);
+    free(html);
+    return err;
 }
 
 static esp_err_t save_post_handler(httpd_req_t *req)
 {
-    char body[1536];
-    int received = httpd_req_recv(req, body, sizeof(body) - 1);
-    if(received <= 0) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No form body");
+    if(req->content_len <= 0 || req->content_len >= SETTINGS_POST_BODY_MAX_LEN) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid form body size");
     }
 
-    body[received] = '\0';
+    char *body = malloc((size_t)req->content_len + 1);
+    if(body == NULL) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    }
+
+    int total_received = 0;
+    while(total_received < req->content_len) {
+        int received = httpd_req_recv(req, body + total_received, req->content_len - total_received);
+        if(received == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if(received <= 0) {
+            free(body);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to read form body");
+        }
+        total_received += received;
+    }
+
+    body[total_received] = '\0';
     app_preferences_t prefs = s_current_preferences;
     char temp[96];
 
@@ -179,10 +207,10 @@ static esp_err_t save_post_handler(httpd_req_t *req)
         prefs.weather_refresh_minutes = parse_u16_or_default(temp, prefs.weather_refresh_minutes);
     }
     if(get_form_value(body, "bus_refresh", temp, sizeof(temp))) {
-        prefs.bus_refresh_minutes = parse_u16_or_default(temp, prefs.bus_refresh_minutes);
+        prefs.bus_refresh_seconds = parse_u16_or_default(temp, prefs.bus_refresh_seconds);
     }
     if(get_form_value(body, "subway_refresh", temp, sizeof(temp))) {
-        prefs.subway_refresh_minutes = parse_u16_or_default(temp, prefs.subway_refresh_minutes);
+        prefs.subway_refresh_seconds = parse_u16_or_default(temp, prefs.subway_refresh_seconds);
     }
     if(get_form_value(body, "finance_refresh", temp, sizeof(temp))) {
         prefs.finance_refresh_minutes = parse_u16_or_default(temp, prefs.finance_refresh_minutes);
@@ -190,6 +218,7 @@ static esp_err_t save_post_handler(httpd_req_t *req)
 
     wifi_settings_sanitize_preferences(&prefs);
     if(wifi_settings_save_preferences(&prefs) != ESP_OK) {
+        free(body);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save settings");
     }
 
@@ -198,6 +227,7 @@ static esp_err_t save_post_handler(httpd_req_t *req)
     s_current_preferences = prefs;
     s_pending_preferences = prefs;
     s_has_pending_update = true;
+    free(body);
 
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_sendstr(req,
@@ -209,6 +239,8 @@ static esp_err_t save_post_handler(httpd_req_t *req)
 static esp_err_t start_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.stack_size = SETTINGS_HTTPD_STACK_SIZE;
+    config.max_req_hdr_len = SETTINGS_HTTPD_MAX_REQ_HDR_LEN;
     config.max_uri_handlers = 4;
 
     esp_err_t err = httpd_start(&s_server, &config);

@@ -1,6 +1,10 @@
 idf_component_register(
     SRCS
         "app_data_service.c"
+        "fonts/lv_font_korean_10.c"
+        "fonts/lv_font_korean_11.c"
+        "fonts/lv_font_korean_12.c"
+        "fonts/lv_font_korean_9.c"
         "main.c"
         "settings_web_server.c"
         "smart_clock_app.c"
