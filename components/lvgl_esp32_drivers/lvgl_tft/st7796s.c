@@ -33,8 +33,6 @@ typedef struct
 /**********************
  *  STATIC PROTOTYPES
  **********************/
-static void st7796s_set_orientation(uint8_t orientation);
-
 static void st7796s_send_cmd(uint8_t cmd);
 static void st7796s_send_data(void *data, uint16_t length);
 static void st7796s_send_color(void *data, uint16_t length);
@@ -181,7 +179,7 @@ static void st7796s_send_color(void *data, uint16_t length)
 	disp_spi_send_colors(data, length);
 }
 
-static void st7796s_set_orientation(uint8_t orientation)
+void st7796s_set_orientation(uint8_t orientation)
 {
 	// ESP_ASSERT(orientation < 4);
 

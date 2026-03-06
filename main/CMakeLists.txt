@@ -1,2 +1,24 @@
-idf_component_register(SRCS "main.c"
-                    INCLUDE_DIRS ".")
+idf_component_register(
+    SRCS
+        "app_data_service.c"
+        "main.c"
+        "settings_web_server.c"
+        "smart_clock_app.c"
+        "wifi_settings.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        esp_event
+        esp_http_client
+        esp_http_server
+        esp_netif
+        esp_timer
+        esp_wifi
+        json
+        lv_porting
+        lvgl
+        lvgl_esp32_drivers
+        lwip
+        mbedtls
+        nvs_flash
+)

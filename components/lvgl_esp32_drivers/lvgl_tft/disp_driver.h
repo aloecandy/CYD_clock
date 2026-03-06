@@ -17,6 +17,7 @@ extern "C" {
 #else
 #include "lvgl/lvgl.h"
 #endif
+#include "esp_err.h"
 
 #if defined CONFIG_LV_TFT_DISPLAY_CONTROLLER_ILI9341
 #include "ili9341.h"
@@ -80,6 +81,12 @@ void disp_driver_rounder(lv_disp_drv_t * disp_drv, lv_area_t * area);
 /* Display set_px callback, used with monochrome dispays */
 void disp_driver_set_px(lv_disp_drv_t * disp_drv, uint8_t * buf, lv_coord_t buf_w, lv_coord_t x, lv_coord_t y,
     lv_color_t color, lv_opa_t opa);
+
+/* Runtime display controls used by the smart clock settings UI */
+void disp_driver_set_backlight(int brightness_percent);
+bool disp_driver_backlight_supports_pwm(void);
+esp_err_t disp_driver_set_orientation(uint8_t orientation);
+uint8_t disp_driver_get_orientation(void);
 
 /**********************
  *      MACROS

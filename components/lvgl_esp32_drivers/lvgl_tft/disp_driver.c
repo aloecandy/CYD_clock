@@ -7,6 +7,9 @@
 #include "esp_lcd_backlight.h"
 #include "sdkconfig.h"
 
+static disp_backlight_h s_backlight_handle;
+static uint8_t s_orientation = CONFIG_LV_DISPLAY_ORIENTATION;
+
 void *disp_driver_init(void)
 {
 #if defined CONFIG_LV_TFT_DISPLAY_CONTROLLER_ILI9341
@@ -65,9 +68,9 @@ void *disp_driver_init(void)
         .timer_idx = 0,
         .channel_idx = 0 // @todo this prevents us from having two PWM controlled displays
     };
-    disp_backlight_h bckl_handle = disp_backlight_new(&bckl_config);
-    disp_backlight_set(bckl_handle, 100);
-    return bckl_handle;
+    s_backlight_handle = disp_backlight_new(&bckl_config);
+    disp_backlight_set(s_backlight_handle, 100);
+    return s_backlight_handle;
 #else
     return NULL;
 #endif
@@ -147,4 +150,39 @@ void disp_driver_set_px(lv_disp_drv_t * disp_drv, uint8_t * buf, lv_coord_t buf_
 #elif defined CONFIG_LV_TFT_DISPLAY_CONTROLLER_PCD8544
    pcd8544_set_px_cb(disp_drv, buf, buf_w, x, y, color, opa);
 #endif
+}
+
+void disp_driver_set_backlight(int brightness_percent)
+{
+    disp_backlight_set(s_backlight_handle, brightness_percent);
+}
+
+bool disp_driver_backlight_supports_pwm(void)
+{
+#if defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
+    return true;
+#else
+    return false;
+#endif
+}
+
+esp_err_t disp_driver_set_orientation(uint8_t orientation)
+{
+#if defined(CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7796S)
+    if(orientation != 2 && orientation != 3) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    st7796s_set_orientation(orientation);
+    s_orientation = orientation;
+    return ESP_OK;
+#else
+    LV_UNUSED(orientation);
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+uint8_t disp_driver_get_orientation(void)
+{
+    return s_orientation;
 }

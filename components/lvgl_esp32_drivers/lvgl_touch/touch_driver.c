@@ -4,6 +4,7 @@
 
 #include "touch_driver.h"
 #include "tp_spi.h"
+#include "disp_driver.h"
 
 
 void touch_driver_init(void)
@@ -49,10 +50,17 @@ bool touch_driver_read(lv_indev_drv_t *drv, lv_indev_data_t *data)
     res = gt911_read(drv, data);
 #endif
 
+    if(data->state == LV_INDEV_STATE_PR || data->state == LV_INDEV_STATE_REL) {
+        uint8_t orientation = disp_driver_get_orientation();
+        if(orientation == 3) {
+            data->point.x = LV_HOR_RES - data->point.x - 1;
+            data->point.y = LV_VER_RES - data->point.y - 1;
+        }
+    }
+
 #if LVGL_VERSION_MAJOR >= 8
     data->continue_reading = res;
 #else
     return res;
 #endif
 }
-

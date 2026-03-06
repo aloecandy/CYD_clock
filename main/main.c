@@ -2,14 +2,12 @@
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_system.h"
-#include "esp_spi_flash.h"
 
 #include "lvgl.h"
 #include "lv_port_disp.h"
 #include "lv_port_indev.h"
 #include "esp_timer.h"
-#include "lv_demos.h"
+#include "smart_clock_app.h"
 
 static void inc_lvgl_tick(void *arg)
 {
@@ -30,7 +28,7 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_tick_timer, 10 * 1000));
 
-    lv_demo_widgets();
+    smart_clock_app_start();
 
     while (1)
     {
