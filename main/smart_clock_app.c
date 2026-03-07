@@ -1022,7 +1022,16 @@ static void update_data_labels(void)
     lv_label_set_text(s_subway_updated_label, updated_text);
     for(int i = 0; i < APP_MAX_SUBWAY_ITEMS; ++i) {
         if(i < snapshot.subway_count) {
-            if(snapshot.subway_items[i].arrival[0] != '\0') {
+            if(snapshot.subway_items[i].destination[0] != '\0' && snapshot.subway_items[i].arrival[0] != '\0') {
+                lv_label_set_text_fmt(s_subway_labels[i], "%s | %s\n%s",
+                                      snapshot.subway_items[i].line,
+                                      snapshot.subway_items[i].destination,
+                                      snapshot.subway_items[i].arrival);
+            } else if(snapshot.subway_items[i].destination[0] != '\0') {
+                lv_label_set_text_fmt(s_subway_labels[i], "%s | %s",
+                                      snapshot.subway_items[i].line,
+                                      snapshot.subway_items[i].destination);
+            } else if(snapshot.subway_items[i].arrival[0] != '\0') {
                 lv_label_set_text_fmt(s_subway_labels[i], "%s / %s",
                                       snapshot.subway_items[i].line,
                                       snapshot.subway_items[i].arrival);

@@ -211,6 +211,58 @@ static void set_subway_status(app_data_snapshot_t *snapshot, const char *station
     snapshot->subway_updated_at = time(NULL);
 }
 
+static const char *subway_service_name_for_id(const char *subway_id)
+{
+    if(subway_id == NULL || subway_id[0] == '\0') return NULL;
+    if(strcmp(subway_id, "1001") == 0) return "1호선";
+    if(strcmp(subway_id, "1002") == 0) return "2호선";
+    if(strcmp(subway_id, "1003") == 0) return "3호선";
+    if(strcmp(subway_id, "1004") == 0) return "4호선";
+    if(strcmp(subway_id, "1005") == 0) return "5호선";
+    if(strcmp(subway_id, "1006") == 0) return "6호선";
+    if(strcmp(subway_id, "1007") == 0) return "7호선";
+    if(strcmp(subway_id, "1008") == 0) return "8호선";
+    if(strcmp(subway_id, "1009") == 0) return "9호선";
+    if(strcmp(subway_id, "1032") == 0) return "GTX-A";
+    if(strcmp(subway_id, "1061") == 0) return "중앙선";
+    if(strcmp(subway_id, "1063") == 0) return "경의중앙선";
+    if(strcmp(subway_id, "1065") == 0) return "공항철도";
+    if(strcmp(subway_id, "1067") == 0) return "경춘선";
+    if(strcmp(subway_id, "1075") == 0) return "수인분당선";
+    if(strcmp(subway_id, "1077") == 0) return "신분당선";
+    if(strcmp(subway_id, "1081") == 0) return "경강선";
+    if(strcmp(subway_id, "1092") == 0) return "우이신설선";
+    if(strcmp(subway_id, "1093") == 0) return "서해선";
+    if(strcmp(subway_id, "1094") == 0) return "신림선";
+    return NULL;
+}
+
+static void format_subway_service_label(char *buffer, size_t buffer_len,
+                                        const char *subway_id, const char *subway_nm,
+                                        const char *updn_line)
+{
+    const char *service_name = subway_nm;
+
+    if(buffer_len == 0) {
+        return;
+    }
+
+    buffer[0] = '\0';
+    if(service_name == NULL || service_name[0] == '\0') {
+        service_name = subway_service_name_for_id(subway_id);
+    }
+
+    if(service_name != NULL && service_name[0] != '\0') {
+        if(updn_line != NULL && updn_line[0] != '\0') {
+            snprintf(buffer, buffer_len, "%s %s", service_name, updn_line);
+        } else {
+            strlcpy(buffer, service_name, buffer_len);
+        }
+    } else if(updn_line != NULL && updn_line[0] != '\0') {
+        strlcpy(buffer, updn_line, buffer_len);
+    }
+}
+
 static esp_err_t fetch_weather_data(const app_preferences_t *prefs, app_data_snapshot_t *snapshot)
 {
     double lat = 0.0;
@@ -391,20 +443,30 @@ static esp_err_t fetch_subway_data(const app_preferences_t *prefs, app_data_snap
                 break;
             }
 
-            const char *line = cJSON_GetStringValue(cJSON_GetObjectItem(item, "trainLineNm"));
+            const char *subway_id = cJSON_GetStringValue(cJSON_GetObjectItem(item, "subwayId"));
+            const char *subway_nm = cJSON_GetStringValue(cJSON_GetObjectItem(item, "subwayNm"));
+            const char *updn_line = cJSON_GetStringValue(cJSON_GetObjectItem(item, "updnLine"));
+            const char *train_line = cJSON_GetStringValue(cJSON_GetObjectItem(item, "trainLineNm"));
             const char *arrival = cJSON_GetStringValue(cJSON_GetObjectItem(item, "arvlMsg2"));
-            const char *dest = cJSON_GetStringValue(cJSON_GetObjectItem(item, "arvlMsg3"));
             const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(item, "statnNm"));
+            char service_label[sizeof(snapshot->subway_items[0].line)];
 
             if(name != NULL && snapshot->subway_count == 0) {
                 strlcpy(snapshot->station_name, name, sizeof(snapshot->station_name));
             }
 
-            if(line != NULL && arrival != NULL) {
+            if(train_line != NULL && arrival != NULL) {
+                format_subway_service_label(service_label, sizeof(service_label), subway_id, subway_nm, updn_line);
+
                 app_subway_item_t *out = &snapshot->subway_items[snapshot->subway_count++];
-                strlcpy(out->line, line, sizeof(out->line));
+                if(service_label[0] != '\0') {
+                    strlcpy(out->line, service_label, sizeof(out->line));
+                    strlcpy(out->destination, train_line, sizeof(out->destination));
+                } else {
+                    strlcpy(out->line, train_line, sizeof(out->line));
+                    out->destination[0] = '\0';
+                }
                 strlcpy(out->arrival, arrival, sizeof(out->arrival));
-                strlcpy(out->destination, dest ? dest : "", sizeof(out->destination));
             }
         }
     } else {
