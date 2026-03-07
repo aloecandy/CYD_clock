@@ -420,7 +420,8 @@ void _lv_disp_refr_timer(lv_timer_t * tmr)
         if(now > 0 && localtime_r(&now, &time_info) != NULL) {
             strftime(time_buf, sizeof(time_buf), "%H:%M:%S", &time_info);
         }
-        lv_label_set_text_fmt(perf_label, "%s\n%"LV_PRIu32" FPS\n%"LV_PRIu32"%% CPU", time_buf, fps, cpu);
+        lv_label_set_text_fmt(perf_label, "%s", time_buf);
+        //lv_label_set_text_fmt(perf_label, "%s\n%"LV_PRIu32" FPS\n%"LV_PRIu32"%% CPU", time_buf, fps, cpu);
     }
 #endif
 

@@ -20,6 +20,13 @@ LV_FONT_DECLARE(lv_font_korean_12);
 #define WEATHER_CANVAS_SIZE 120
 #define AIR_QUALITY_CANVAS_SIZE 120
 #define ICON_BASE_SIZE 120
+#define UI_TAG_BLUE "2D6CDF"
+#define UI_TAG_TEAL "1F7A8C"
+#define UI_TAG_GREEN "1F8A70"
+#define UI_TAG_AMBER "B7791F"
+#define UI_TAG_RED "C05621"
+#define UI_TAG_SLATE "4A5568"
+#define UI_TAG_GREY "718096"
 
 enum {
     TAB_TIME = 0,
@@ -62,6 +69,7 @@ static lv_obj_t *s_finance_chart;
 static lv_chart_series_t *s_finance_series;
 static lv_obj_t *s_bus_labels[APP_MAX_BUS_ITEMS];
 static lv_obj_t *s_subway_labels[APP_MAX_SUBWAY_ITEMS];
+static lv_obj_t *s_subway_arrival_labels[APP_MAX_SUBWAY_ITEMS];
 static lv_timer_t *s_ui_timer;
 static lv_timer_t *s_clock_timer;
 static lv_obj_t *s_clock_meter;
@@ -86,6 +94,18 @@ static lv_coord_t scale_icon_span(lv_coord_t value, lv_coord_t size)
 {
     lv_coord_t scaled = scale_icon_coord(value, size);
     return scaled > 0 ? scaled : 1;
+}
+
+static void enable_label_recolor(lv_obj_t *label)
+{
+    lv_label_set_recolor(label, true);
+}
+
+static const char *aqi_color_tag_for_value(int aqi)
+{
+    if(aqi <= 50) return UI_TAG_GREEN;
+    if(aqi <= 100) return UI_TAG_AMBER;
+    return UI_TAG_RED;
 }
 
 static void textarea_event_cb(lv_event_t *e)
@@ -754,12 +774,14 @@ static void populate_weather_tab(lv_obj_t *tab)
     lv_obj_set_style_text_align(s_weather_summary_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(s_weather_summary_label,
                                compact ? &lv_font_montserrat_16 : &lv_font_montserrat_24, 0);
+    enable_label_recolor(s_weather_summary_label);
     s_weather_temp_label = lv_label_create(weather_panel);
     lv_obj_set_width(s_weather_temp_label, LV_PCT(100));
     lv_obj_set_style_text_align(s_weather_temp_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(s_weather_temp_label,
                                compact ? &lv_font_montserrat_12 : &lv_font_montserrat_16, 0);
     lv_label_set_long_mode(s_weather_temp_label, LV_LABEL_LONG_WRAP);
+    enable_label_recolor(s_weather_temp_label);
 
     lv_obj_t *air_panel = create_visual_panel(tab, "Air Quality");
     s_air_quality_canvas = lv_obj_create(air_panel);
@@ -773,6 +795,7 @@ static void populate_weather_tab(lv_obj_t *tab)
     lv_obj_set_style_text_font(s_air_quality_label,
                                compact ? &lv_font_montserrat_12 : &lv_font_montserrat_16, 0);
     lv_label_set_long_mode(s_air_quality_label, LV_LABEL_LONG_WRAP);
+    enable_label_recolor(s_air_quality_label);
 
     s_weather_updated_label = lv_label_create(tab);
     lv_obj_set_width(s_weather_updated_label, LV_PCT(100));
@@ -792,19 +815,25 @@ static void populate_bus_tab(lv_obj_t *tab)
     lv_obj_t *card = create_card(tab, "Bus Arrival");
     s_bus_title_label = lv_label_create(card);
     apply_korean_font(s_bus_title_label, &lv_font_korean_12);
+    enable_label_recolor(s_bus_title_label);
     s_bus_updated_label = lv_label_create(card);
     apply_korean_font(s_bus_updated_label, &lv_font_korean_10);
+    lv_obj_set_style_text_color(s_bus_updated_label, lv_palette_darken(LV_PALETTE_GREY, 2), 0);
 
     for(int i = 0; i < APP_MAX_BUS_ITEMS; ++i) {
         s_bus_labels[i] = lv_label_create(card);
         lv_obj_set_width(s_bus_labels[i], LV_PCT(100));
         lv_label_set_long_mode(s_bus_labels[i], LV_LABEL_LONG_WRAP);
         apply_korean_font(s_bus_labels[i], &lv_font_korean_11);
+        enable_label_recolor(s_bus_labels[i]);
     }
 }
 
 static void populate_subway_tab(lv_obj_t *tab)
 {
+    bool compact = LV_HOR_RES <= 320;
+    lv_coord_t arrival_width = compact ? 108 : 132;
+
     lv_obj_set_style_pad_all(tab, 12, 0);
     lv_obj_set_layout(tab, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_COLUMN);
@@ -814,14 +843,34 @@ static void populate_subway_tab(lv_obj_t *tab)
     lv_obj_t *card = create_card(tab, "Subway Arrival");
     s_subway_title_label = lv_label_create(card);
     apply_korean_font(s_subway_title_label, &lv_font_korean_12);
+    enable_label_recolor(s_subway_title_label);
     s_subway_updated_label = lv_label_create(card);
     apply_korean_font(s_subway_updated_label, &lv_font_korean_10);
+    lv_obj_set_style_text_color(s_subway_updated_label, lv_palette_darken(LV_PALETTE_GREY, 2), 0);
 
     for(int i = 0; i < APP_MAX_SUBWAY_ITEMS; ++i) {
-        s_subway_labels[i] = lv_label_create(card);
-        lv_obj_set_width(s_subway_labels[i], LV_PCT(100));
-        lv_label_set_long_mode(s_subway_labels[i], LV_LABEL_LONG_WRAP);
-        apply_korean_font(s_subway_labels[i], &lv_font_korean_11);
+        lv_obj_t *row = lv_obj_create(card);
+        style_plain_container(row);
+        lv_obj_set_width(row, LV_PCT(100));
+        lv_obj_set_height(row, LV_SIZE_CONTENT);
+        lv_obj_set_layout(row, LV_LAYOUT_FLEX);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_gap(row, compact ? 6 : 8, 0);
+
+        s_subway_labels[i] = lv_label_create(row);
+        lv_obj_set_width(s_subway_labels[i], 0);
+        lv_obj_set_flex_grow(s_subway_labels[i], 1);
+        lv_label_set_long_mode(s_subway_labels[i], LV_LABEL_LONG_DOT);
+        apply_korean_font(s_subway_labels[i], compact ? &lv_font_korean_10 : &lv_font_korean_11);
+        enable_label_recolor(s_subway_labels[i]);
+
+        s_subway_arrival_labels[i] = lv_label_create(row);
+        lv_obj_set_width(s_subway_arrival_labels[i], arrival_width);
+        lv_label_set_long_mode(s_subway_arrival_labels[i], LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_align(s_subway_arrival_labels[i], LV_TEXT_ALIGN_RIGHT, 0);
+        apply_korean_font(s_subway_arrival_labels[i], &lv_font_korean_10);
+        enable_label_recolor(s_subway_arrival_labels[i]);
     }
 }
 
@@ -835,9 +884,12 @@ static void populate_finance_tab(lv_obj_t *tab)
 
     lv_obj_t *card = create_card(tab, "Yahoo Finance");
     s_finance_name_label = lv_label_create(card);
+    enable_label_recolor(s_finance_name_label);
     s_finance_price_label = lv_label_create(card);
+    enable_label_recolor(s_finance_price_label);
     s_finance_updated_label = lv_label_create(card);
     apply_korean_font(s_finance_updated_label, &lv_font_korean_9);
+    lv_obj_set_style_text_color(s_finance_updated_label, lv_palette_darken(LV_PALETTE_GREY, 2), 0);
 
     s_finance_chart = lv_chart_create(card);
     lv_obj_set_size(s_finance_chart, LV_PCT(100), 160);
@@ -962,27 +1014,27 @@ static void schedule_due_refreshes(const app_data_snapshot_t *snapshot)
 static void update_data_labels(void)
 {
     app_data_snapshot_t snapshot;
-    char weather_text[48];
-    char air_quality_text[96];
     char updated_text[16];
 
     app_data_service_get_snapshot(&snapshot);
 
     if(snapshot.weather_valid) {
-        snprintf(weather_text, sizeof(weather_text), "%s\n%s",
-                 strcmp(snapshot.weather_target, "TOMORROW") == 0 ? "Tomorrow" : "Today",
-                 weather_description_for_code(snapshot.weather_code));
-        lv_label_set_text(s_weather_summary_label, weather_text);
-        lv_label_set_text_fmt(s_weather_temp_label, "Now %dC\nLow %dC  High %dC",
+        lv_label_set_text_fmt(s_weather_summary_label, "#" UI_TAG_BLUE " %s#\n#" UI_TAG_SLATE " %s#",
+                              strcmp(snapshot.weather_target, "TOMORROW") == 0 ? "Tomorrow" : "Today",
+                              weather_description_for_code(snapshot.weather_code));
+        lv_label_set_text_fmt(s_weather_temp_label,
+                              "#" UI_TAG_AMBER " Now# %dC\n#" UI_TAG_BLUE " Low# %dC  #" UI_TAG_RED " High# %dC",
                               snapshot.weather_current_temp,
                               snapshot.weather_min_temp,
                               snapshot.weather_max_temp);
-        snprintf(air_quality_text, sizeof(air_quality_text), "%s\nAQI %d\nPM10 %.1f  PM2.5 %.1f",
-                 air_quality_description_for_value(snapshot.air_quality_index),
-                 snapshot.air_quality_index,
-                 snapshot.air_pm10,
-                 snapshot.air_pm25);
-        lv_label_set_text(s_air_quality_label, air_quality_text);
+        lv_label_set_text_fmt(s_air_quality_label,
+                              "#%s %s#\n#" UI_TAG_AMBER " AQI# %d\n#" UI_TAG_TEAL " PM10# %.1f  #"
+                              UI_TAG_BLUE " PM2.5# %.1f",
+                              aqi_color_tag_for_value(snapshot.air_quality_index),
+                              air_quality_description_for_value(snapshot.air_quality_index),
+                              snapshot.air_quality_index,
+                              snapshot.air_pm10,
+                              snapshot.air_pm25);
         s_weather_visual_code = snapshot.weather_code;
         s_air_quality_visual_value = snapshot.air_quality_index;
         lv_obj_invalidate(s_weather_canvas);
@@ -1001,13 +1053,15 @@ static void update_data_labels(void)
     format_update_time(updated_text, sizeof(updated_text), snapshot.weather_updated_at);
     lv_label_set_text(s_weather_updated_label, updated_text);
 
-    lv_label_set_text_fmt(s_bus_title_label, "Stop: %s",
+    lv_label_set_text_fmt(s_bus_title_label, "#" UI_TAG_BLUE " Stop:# %s",
                           snapshot.stop_name[0] ? snapshot.stop_name : s_preferences.bus_stop_id);
     format_update_time(updated_text, sizeof(updated_text), snapshot.bus_updated_at);
     lv_label_set_text(s_bus_updated_label, updated_text);
     for(int i = 0; i < APP_MAX_BUS_ITEMS; ++i) {
         if(i < snapshot.bus_count) {
-            lv_label_set_text_fmt(s_bus_labels[i], "%s -> %s / %s",
+            lv_label_set_text_fmt(s_bus_labels[i],
+                                  "#" UI_TAG_BLUE " %s#  #" UI_TAG_GREEN " %s#  #" UI_TAG_GREY " /#  #"
+                                  UI_TAG_AMBER " %s#",
                                   snapshot.bus_items[i].route,
                                   snapshot.bus_items[i].arrival1,
                                   snapshot.bus_items[i].arrival2);
@@ -1016,37 +1070,37 @@ static void update_data_labels(void)
         }
     }
 
-    lv_label_set_text_fmt(s_subway_title_label, "Station: %s",
+    lv_label_set_text_fmt(s_subway_title_label, "#" UI_TAG_BLUE " Station:# %s",
                           snapshot.station_name[0] ? snapshot.station_name : s_preferences.subway_station);
     format_update_time(updated_text, sizeof(updated_text), snapshot.subway_updated_at);
     lv_label_set_text(s_subway_updated_label, updated_text);
     for(int i = 0; i < APP_MAX_SUBWAY_ITEMS; ++i) {
         if(i < snapshot.subway_count) {
-            if(snapshot.subway_items[i].destination[0] != '\0' && snapshot.subway_items[i].arrival[0] != '\0') {
-                lv_label_set_text_fmt(s_subway_labels[i], "%s | %s\n%s",
-                                      snapshot.subway_items[i].line,
-                                      snapshot.subway_items[i].destination,
-                                      snapshot.subway_items[i].arrival);
-            } else if(snapshot.subway_items[i].destination[0] != '\0') {
-                lv_label_set_text_fmt(s_subway_labels[i], "%s | %s",
+            if(snapshot.subway_items[i].destination[0] != '\0') {
+                lv_label_set_text_fmt(s_subway_labels[i], "#" UI_TAG_TEAL " %s#  #" UI_TAG_AMBER " | %s#",
                                       snapshot.subway_items[i].line,
                                       snapshot.subway_items[i].destination);
-            } else if(snapshot.subway_items[i].arrival[0] != '\0') {
-                lv_label_set_text_fmt(s_subway_labels[i], "%s / %s",
-                                      snapshot.subway_items[i].line,
+            } else {
+                lv_label_set_text_fmt(s_subway_labels[i], "#" UI_TAG_TEAL " %s#",
+                                      snapshot.subway_items[i].line);
+            }
+
+            if(snapshot.subway_items[i].arrival[0] != '\0') {
+                lv_label_set_text_fmt(s_subway_arrival_labels[i], "#" UI_TAG_GREEN " %s#",
                                       snapshot.subway_items[i].arrival);
             } else {
-                lv_label_set_text(s_subway_labels[i], snapshot.subway_items[i].line);
+                lv_label_set_text(s_subway_arrival_labels[i], "");
             }
         } else {
             lv_label_set_text(s_subway_labels[i], "-");
+            lv_label_set_text(s_subway_arrival_labels[i], "");
         }
     }
 
-    lv_label_set_text(s_finance_name_label,
-                      snapshot.finance_name[0] ? snapshot.finance_name : s_preferences.finance_ticker);
-    lv_label_set_text(s_finance_price_label,
-                      snapshot.finance_price[0] ? snapshot.finance_price : "Finance pending...");
+    lv_label_set_text_fmt(s_finance_name_label, "#" UI_TAG_BLUE " Asset:# %s",
+                          snapshot.finance_name[0] ? snapshot.finance_name : s_preferences.finance_ticker);
+    lv_label_set_text_fmt(s_finance_price_label, "#" UI_TAG_GREEN " Price:# %s",
+                          snapshot.finance_price[0] ? snapshot.finance_price : "Finance pending...");
     format_update_time(updated_text, sizeof(updated_text), snapshot.finance_updated_at);
     lv_label_set_text(s_finance_updated_label, updated_text);
 
