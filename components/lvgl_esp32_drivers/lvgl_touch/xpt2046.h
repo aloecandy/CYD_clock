@@ -35,7 +35,7 @@ extern "C" {
 #define XPT2046_X_INV           CONFIG_LV_TOUCH_INVERT_X
 #define XPT2046_Y_INV           CONFIG_LV_TOUCH_INVERT_Y
 #define XPT2046_XY_SWAP		    CONFIG_LV_TOUCH_XY_SWAP
-#define XPT2046_TOUCH_THRESHOLD 400 // Threshold for touch detection
+#define XPT2046_TOUCH_THRESHOLD 150 // Lower threshold helps when IRQ is unreliable and pressure is weak
 #define XPT2046_TOUCH_IRQ       CONFIG_LV_TOUCH_DETECT_IRQ
 #define XPT2046_TOUCH_IRQ_PRESS CONFIG_LV_TOUCH_DETECT_IRQ_PRESSURE
 #define XPT2046_TOUCH_PRESS     CONFIG_LV_TOUCH_DETECT_PRESSURE

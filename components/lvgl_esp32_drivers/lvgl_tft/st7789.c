@@ -9,6 +9,7 @@
 #include "sdkconfig.h"
 
 #include "esp_log.h"
+#include "esp_rom_gpio.h"
 
 #include "st7789.h"
 
@@ -33,8 +34,6 @@ typedef struct {
 /**********************
  *  STATIC PROTOTYPES
  **********************/
-static void st7789_set_orientation(uint8_t orientation);
-
 static void st7789_send_color(void *data, size_t length);
 
 /**********************
@@ -51,57 +50,47 @@ static void st7789_send_color(void *data, size_t length);
 void st7789_init(void)
 {
     lcd_init_cmd_t st7789_init_cmds[] = {
-        {0xCF, {0x00, 0x83, 0X30}, 3},
-        {0xED, {0x64, 0x03, 0X12, 0X81}, 4},
-        {ST7789_PWCTRL2, {0x85, 0x01, 0x79}, 3},
-        {0xCB, {0x39, 0x2C, 0x00, 0x34, 0x02}, 5},
-        {0xF7, {0x20}, 1},
-        {0xEA, {0x00, 0x00}, 2},
-        {ST7789_LCMCTRL, {0x26}, 1},
-        {ST7789_IDSET, {0x11}, 1},
-        {ST7789_VCMOFSET, {0x35, 0x3E}, 2},
-        {ST7789_CABCCTRL, {0xBE}, 1},
-        {ST7789_MADCTL, {0x00}, 1}, // Set to 0x28 if your display is flipped
+        {ST7789_SLPOUT, {0}, 0x80},
         {ST7789_COLMOD, {0x55}, 1},
+        {ST7789_RAMCTRL, {0x00, 0xF0}, 2},
+        {ST7789_PORCTRL, {0x0C, 0x0C, 0x00, 0x33, 0x33}, 5},
+        {ST7789_GCTRL, {0x35}, 1},
+        {ST7789_VCOMS, {0x28}, 1},
+        {ST7789_LCMCTRL, {0x0C}, 1},
+        {ST7789_VDVVRHEN, {0x01, 0xFF}, 2},
+        {ST7789_VRHS, {0x10}, 1},
+        {ST7789_VDVSET, {0x20}, 1},
+        {ST7789_FRCTR2, {0x0F}, 1},
+        {ST7789_PWCTRL1, {0xA4, 0xA1}, 2},
 
 #if ST7789_INVERT_COLORS == 1
-		{ST7789_INVON, {0}, 0}, // set inverted mode
+        {ST7789_INVON, {0}, 0},
 #else
- 		{ST7789_INVOFF, {0}, 0}, // set non-inverted mode
+        {ST7789_INVOFF, {0}, 0},
 #endif
-
-        {ST7789_RGBCTRL, {0x00, 0x1B}, 2},
-        {0xF2, {0x08}, 1},
-        {ST7789_GAMSET, {0x01}, 1},
-        {ST7789_PVGAMCTRL, {0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x32, 0x44, 0x42, 0x06, 0x0E, 0x12, 0x14, 0x17}, 14},
-        {ST7789_NVGAMCTRL, {0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x31, 0x54, 0x47, 0x0E, 0x1C, 0x17, 0x1B, 0x1E}, 14},
-        {ST7789_CASET, {0x00, 0x00, 0x00, 0xEF}, 4},
-        {ST7789_RASET, {0x00, 0x00, 0x01, 0x3f}, 4},
-        {ST7789_RAMWR, {0}, 0},
-        {ST7789_GCTRL, {0x07}, 1},
-        {0xB6, {0x0A, 0x82, 0x27, 0x00}, 4},
-        {ST7789_SLPOUT, {0}, 0x80},
+        {ST7789_NORON, {0}, 0x80},
         {ST7789_DISPON, {0}, 0x80},
         {0, {0}, 0xff},
     };
 
     //Initialize non-SPI GPIOs
-    gpio_pad_select_gpio(ST7789_DC);
+    esp_rom_gpio_pad_select_gpio(ST7789_DC);
     gpio_set_direction(ST7789_DC, GPIO_MODE_OUTPUT);
 
 #if !defined(ST7789_SOFT_RST)
-    gpio_pad_select_gpio(ST7789_RST);
+    esp_rom_gpio_pad_select_gpio(ST7789_RST);
     gpio_set_direction(ST7789_RST, GPIO_MODE_OUTPUT);
 #endif
 
     //Reset the display
 #if !defined(ST7789_SOFT_RST)
     gpio_set_level(ST7789_RST, 0);
-    vTaskDelay(100 / portTICK_RATE_MS);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
     gpio_set_level(ST7789_RST, 1);
-    vTaskDelay(100 / portTICK_RATE_MS);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
 #else
     st7789_send_cmd(ST7789_SWRESET);
+    vTaskDelay(150 / portTICK_PERIOD_MS);
 #endif
 
     printf("ST7789 initialization.\n");
@@ -112,7 +101,7 @@ void st7789_init(void)
         st7789_send_cmd(st7789_init_cmds[cmd].cmd);
         st7789_send_data(st7789_init_cmds[cmd].data, st7789_init_cmds[cmd].databytes&0x1F);
         if (st7789_init_cmds[cmd].databytes & 0x80) {
-                vTaskDelay(100 / portTICK_RATE_MS);
+                vTaskDelay(100 / portTICK_PERIOD_MS);
         }
         cmd++;
     }
@@ -213,7 +202,7 @@ static void st7789_send_color(void * data, size_t length)
     disp_spi_send_colors(data, length);
 }
 
-static void st7789_set_orientation(uint8_t orientation)
+void st7789_set_orientation(uint8_t orientation)
 {
     // ESP_ASSERT(orientation < 4);
 
@@ -223,12 +212,11 @@ static void st7789_set_orientation(uint8_t orientation)
 
     ESP_LOGI(TAG, "Display orientation: %s", orientation_str[orientation]);
 
-    uint8_t data[] =
-    {
+    uint8_t data[] = {
 #if CONFIG_LV_PREDEFINED_DISPLAY_TTGO
-	0x60, 0xA0, 0x00, 0xC0
+        0x68, 0xA8, 0x08, 0xC8
 #else
-	0xC0, 0x00, 0x60, 0xA0
+        0xC8, 0x08, 0x68, 0xA8
 #endif
     };
 

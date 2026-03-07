@@ -73,6 +73,12 @@ void xpt2046_init(void)
     esp_err_t ret = gpio_config(&irq_config);
     assert(ret == ESP_OK);
 #endif
+
+#if XPT2046_TOUCH_PRESS || XPT2046_TOUCH_IRQ_PRESS
+    int16_t z1 = xpt2046_cmd(CMD_Z1_READ) >> 3;
+    int16_t z2 = xpt2046_cmd(CMD_Z2_READ) >> 3;
+    ESP_LOGI(TAG, "Idle pressure sample z1=%d z2=%d", z1, z2);
+#endif
 }
 
 /**

@@ -5,4 +5,4 @@
 cmake_minimum_required(VERSION 3.16)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(3.5inch_ESP32_LVGL)
+project(E32R28T_ESP32_LVGL)

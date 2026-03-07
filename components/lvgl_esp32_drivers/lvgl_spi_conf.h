@@ -167,14 +167,13 @@ extern "C" {
 #endif
 
 
-#if defined (CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7789)
-#define SPI_TFT_SPI_MODE    (2)
-#else
 #define SPI_TFT_SPI_MODE    (0)
-#endif
 
 /* Touch driver */
-#if (CONFIG_LV_TOUCH_CONTROLLER == TOUCH_CONTROLLER_STMPE610)
+#if defined(CONFIG_LV_TOUCH_CONTROLLER_XPT2046)
+#define SPI_TOUCH_CLOCK_SPEED_HZ    (1*1000*1000)
+#define SPI_TOUCH_SPI_MODE          (0)
+#elif (CONFIG_LV_TOUCH_CONTROLLER == TOUCH_CONTROLLER_STMPE610)
 #define SPI_TOUCH_CLOCK_SPEED_HZ    (1*1000*1000)
 #define SPI_TOUCH_SPI_MODE          (1)
 #else

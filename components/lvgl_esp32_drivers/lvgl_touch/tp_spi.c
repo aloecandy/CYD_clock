@@ -92,7 +92,7 @@ void tp_spi_write_reg(uint8_t* data, uint8_t byte_count)
 void tp_spi_read_reg(uint8_t reg, uint8_t* data, uint8_t byte_count)
 {
 	spi_transaction_t t = {	
-	    .length = (byte_count + sizeof(reg)) * 8,
+	    .length = 0,
 	    .rxlength = byte_count * 8,
 	    .cmd = reg,
 	    .rx_buffer = data,

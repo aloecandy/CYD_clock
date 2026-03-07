@@ -149,8 +149,9 @@ static void apply_korean_font(lv_obj_t *obj, const lv_font_t *font)
 
 static lv_obj_t *create_visual_panel(lv_obj_t *parent, const char *title)
 {
+    bool compact = LV_HOR_RES <= 320;
     lv_obj_t *panel = lv_obj_create(parent);
-    lv_obj_set_size(panel, 216, LV_SIZE_CONTENT);
+    lv_obj_set_size(panel, compact ? LV_PCT(100) : 216, LV_SIZE_CONTENT);
     lv_obj_set_style_pad_all(panel, 12, 0);
     lv_obj_set_style_pad_gap(panel, 8, 0);
     lv_obj_set_style_radius(panel, 12, 0);
@@ -598,15 +599,23 @@ static void tabview_event_cb(lv_event_t *e)
 
 static void populate_time_tab(lv_obj_t *tab)
 {
+    bool compact = LV_HOR_RES <= 320;
+    lv_coord_t clock_card_size = compact ? 180 : 224;
+    lv_coord_t meter_size = compact ? 168 : 208;
+    lv_coord_t hour_r_mod = compact ? -46 : -56;
+    lv_coord_t minute_r_mod = compact ? -20 : -24;
+
     lv_obj_set_style_pad_all(tab, 12, 0);
     lv_obj_set_style_pad_gap(tab, 12, 0);
     lv_obj_set_layout(tab, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(tab, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_flow(tab, compact ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(tab, LV_FLEX_ALIGN_START,
+                          compact ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
     configure_scrollable_tab(tab);
 
     lv_obj_t *clock_card = lv_obj_create(tab);
-    lv_obj_set_size(clock_card, 224, 224);
+    lv_obj_set_size(clock_card, clock_card_size, clock_card_size);
     lv_obj_set_style_pad_all(clock_card, 8, 0);
     lv_obj_set_style_radius(clock_card, 16, 0);
     lv_obj_clear_flag(clock_card, LV_OBJ_FLAG_SCROLLABLE);
@@ -614,7 +623,7 @@ static void populate_time_tab(lv_obj_t *tab)
 
     s_clock_meter = lv_meter_create(clock_card);
     lv_obj_center(s_clock_meter);
-    lv_obj_set_size(s_clock_meter, 208, 208);
+    lv_obj_set_size(s_clock_meter, meter_size, meter_size);
     lv_obj_set_style_bg_opa(s_clock_meter, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_clock_meter, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(s_clock_meter, LV_RADIUS_CIRCLE, LV_PART_MAIN);
@@ -627,13 +636,14 @@ static void populate_time_tab(lv_obj_t *tab)
     lv_meter_set_scale_ticks(s_clock_meter, hour_scale, 2, 0, 0, lv_color_black());
     lv_meter_set_scale_major_ticks(s_clock_meter, hour_scale, 0, 0, 0, lv_color_black(), 0);
     lv_meter_set_scale_range(s_clock_meter, hour_scale, 0, 12 * 60 * 60, 360, 270);
-    s_hour_indic = lv_meter_add_needle_line(s_clock_meter, hour_scale, 6, lv_color_black(), -56);
+    s_hour_indic = lv_meter_add_needle_line(s_clock_meter, hour_scale, 6, lv_color_black(), hour_r_mod);
 
     lv_meter_scale_t *minute_scale = lv_meter_add_scale(s_clock_meter);
     lv_meter_set_scale_ticks(s_clock_meter, minute_scale, 2, 0, 0, lv_color_black());
     lv_meter_set_scale_major_ticks(s_clock_meter, minute_scale, 0, 0, 0, lv_color_black(), 0);
     lv_meter_set_scale_range(s_clock_meter, minute_scale, 0, 60 * 60, 360, 270);
-    s_minute_indic = lv_meter_add_needle_line(s_clock_meter, minute_scale, 4, lv_palette_darken(LV_PALETTE_GREY, 3), -24);
+    s_minute_indic = lv_meter_add_needle_line(s_clock_meter, minute_scale, 4,
+                                              lv_palette_darken(LV_PALETTE_GREY, 3), minute_r_mod);
 
     lv_meter_scale_t *second_scale = lv_meter_add_scale(s_clock_meter);
     lv_meter_set_scale_ticks(s_clock_meter, second_scale, 2, 0, 0, lv_color_black());
@@ -643,8 +653,9 @@ static void populate_time_tab(lv_obj_t *tab)
 
     lv_obj_t *digital_col = lv_obj_create(tab);
     style_plain_container(digital_col);
-    lv_obj_set_height(digital_col, 224);
-    lv_obj_set_flex_grow(digital_col, 1);
+    lv_obj_set_height(digital_col, compact ? LV_SIZE_CONTENT : 224);
+    lv_obj_set_width(digital_col, compact ? LV_PCT(100) : LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(digital_col, compact ? 0 : 1);
     lv_obj_set_style_pad_gap(digital_col, 10, 0);
     lv_obj_set_layout(digital_col, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(digital_col, LV_FLEX_FLOW_COLUMN);
@@ -653,13 +664,15 @@ static void populate_time_tab(lv_obj_t *tab)
     s_digital_date_label = lv_label_create(digital_col);
     lv_obj_set_width(s_digital_date_label, LV_PCT(100));
     lv_obj_set_style_text_align(s_digital_date_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(s_digital_date_label, &lv_font_montserrat_32, 0);
+    lv_obj_set_style_text_font(s_digital_date_label,
+                               compact ? &lv_font_montserrat_24 : &lv_font_montserrat_32, 0);
     lv_obj_set_style_text_color(s_digital_date_label, lv_palette_darken(LV_PALETTE_BLUE_GREY, 1), 0);
 
     s_digital_time_label = lv_label_create(digital_col);
     lv_obj_set_width(s_digital_time_label, LV_PCT(100));
     lv_obj_set_style_text_align(s_digital_time_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(s_digital_time_label, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_font(s_digital_time_label,
+                               compact ? &lv_font_montserrat_40 : &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(s_digital_time_label, lv_color_black(), 0);
 }
 

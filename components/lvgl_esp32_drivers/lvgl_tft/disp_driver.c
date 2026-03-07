@@ -168,7 +168,23 @@ bool disp_driver_backlight_supports_pwm(void)
 
 esp_err_t disp_driver_set_orientation(uint8_t orientation)
 {
-#if defined(CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7796S)
+#if defined(CONFIG_LV_TFT_DISPLAY_CONTROLLER_ILI9341)
+    if(orientation > 3) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    ili9341_set_orientation(orientation);
+    s_orientation = orientation;
+    return ESP_OK;
+#elif defined(CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7789)
+    if(orientation > 3) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    st7789_set_orientation(orientation);
+    s_orientation = orientation;
+    return ESP_OK;
+#elif defined(CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7796S)
     if(orientation != 2 && orientation != 3) {
         return ESP_ERR_NOT_SUPPORTED;
     }

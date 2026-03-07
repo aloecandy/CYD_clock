@@ -23,8 +23,23 @@ extern "C" {
  *      DEFINES
  *********************/
 #ifndef LV_HOR_RES_MAX
-#define LV_HOR_RES_MAX (480)
+#if defined(CONFIG_LV_TFT_DISPLAY_CONTROLLER_ILI9341) || defined(CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7789)
+#if defined(CONFIG_LV_DISPLAY_ORIENTATION_PORTRAIT) || defined(CONFIG_LV_DISPLAY_ORIENTATION_PORTRAIT_INVERTED)
+#define LV_HOR_RES_MAX (240)
+#define LV_VER_RES_MAX (320)
+#else
+#define LV_HOR_RES_MAX (320)
+#define LV_VER_RES_MAX (240)
 #endif
+#elif defined(CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7796S)
+#define LV_HOR_RES_MAX (480)
+#define LV_VER_RES_MAX (320)
+#else
+#define LV_HOR_RES_MAX (480)
+#define LV_VER_RES_MAX (320)
+#endif
+#endif
+
 #ifndef LV_VER_RES_MAX
 #define LV_VER_RES_MAX (320)
 #endif
