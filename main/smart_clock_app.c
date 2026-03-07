@@ -516,13 +516,13 @@ static void clock_meter_draw_event_cb(lv_event_t *e)
 static void format_update_time(char *buffer, size_t buffer_len, time_t timestamp)
 {
     if(timestamp == 0) {
-        strlcpy(buffer, "[--:--:--]", buffer_len);
+        strlcpy(buffer, "@--:--:--", buffer_len);
         return;
     }
 
     struct tm time_info;
     localtime_r(&timestamp, &time_info);
-    strftime(buffer, buffer_len, "[%H:%M:%S]", &time_info);
+    strftime(buffer, buffer_len, "@%H:%M:%S", &time_info);
 }
 
 static bool refresh_due_minutes(time_t now, time_t last_update, uint16_t minutes)
